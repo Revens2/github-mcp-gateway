@@ -18,11 +18,17 @@ consentement, E2E (phases 8-10), revue + GO (11-12).
 - Phase 3 : repo `github-mcp-gateway` poussé, CI verte sur run précédent.
 - Phase 4 : fix OAuth discovery (ressource sans /oauth, resource_metadata doc URL)
   + injection PAT par la gateway (upstream http exige Bearer par requête, preuve
-  token.go v1.12.0). 100/100 tests gateway+redaction verts.
+  token.go v1.12.0). 104/104 tests gateway+redaction verts.
 - Phase 6 : /srv/github installé, image v1.12.0@sha256:46cdbbd8 pinnée, MRTR généré,
-  upstream+gateway actifs loopback, discovery loopback OK.
+  upstream+gateway actifs loopback, code+venv root:root, discovery loopback OK.
 - Phase 7 : 7 blocs nginx insérés (script idempotent, backup, nginx -t OK),
   PRM/AS/401 vérifiés depuis Internet, autres MCP à 200.
+- Phases 8-9 : lecture OK (86 tools, get_me Revens2), écriture OK (issue #2 créée,
+  relue, fermée ; #1 fermée en cleanup). Absences : voir plan.md (scopes PAT).
+- Phase 11 (revue 1) : NO-GO conditionnel, 4 bloquants LEVÉS (argv PAT/phrase via
+  stdin, EtatOAuthCorrompu→503 + handler global, garde loopback upstream, expiry
+  lire_code) + hygiène (venv root, FICHIER_CLIENTS, 5/7 blocs, docstrings).
+  Revalidation : 104 tests verts, val_github lecture verte post-déploiement.
 
 ## À faire
 - [x] Créer le dépôt GitHub `Revens2/github-mcp-gateway` + push.
