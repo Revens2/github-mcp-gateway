@@ -177,14 +177,14 @@ def routes_consentement(fournisseur: FournisseurOAuth) -> list[Route]:
             )
 
         # Consommee seulement maintenant : un consentement ne se rejoue pas.
+        # Tout le bloc final est sous garde magasin (prise + emission du code).
         try:
             demande = fournisseur.magasin.prendre_demande(identifiant)
+            if demande is None:
+                return HTMLResponse("<p>Demande expiree pendant la saisie.</p>", status_code=404)
+            return _rediriger(demande, fournisseur.creer_code(demande))
         except EtatOAuthCorrompu:
             return _indisponible()
-        if demande is None:
-            return HTMLResponse("<p>Demande expiree pendant la saisie.</p>", status_code=404)
-
-        return _rediriger(demande, fournisseur.creer_code(demande))
 
     return [
         Route("/consentement", afficher, methods=["GET"]),

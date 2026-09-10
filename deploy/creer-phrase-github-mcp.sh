@@ -29,11 +29,21 @@ HASH=$(printf '%s' "$P1" | PYTHONPATH="$APP" "$VENV/bin/python" -c \
     'import sys; from github_gateway.oauth import hacher_phrase; print(hacher_phrase(sys.stdin.read()))')
 unset P1 P2
 
-if grep -q '^GITHUB_MCP_CONSENT_HASH=' "$FICHIER"; then
-    sed -i "s|^GITHUB_MCP_CONSENT_HASH=.*|GITHUB_MCP_CONSENT_HASH=$HASH|" "$FICHIER"
-else
-    printf '\nGITHUB_MCP_CONSENT_HASH=%s\n' "$HASH" >> "$FICHIER"
-fi
+# Mise a jour du fichier env via python+stdin : l'empreinte ne transite jamais
+# en argv (invisible de ps), contrairement a un sed -i "...$HASH".
+printf '%s\n%s' "$HASH" "$FICHIER" | "$VENV/bin/python" -c \
+    'import sys; empreinte, chemin = sys.stdin.read().split("\n", 1)
+lignes = []
+try:
+    with open(chemin, encoding="utf-8") as f:
+        lignes = f.read().splitlines()
+except FileNotFoundError:
+    pass
+lignes = [l for l in lignes if not l.startswith("GITHUB_MCP_CONSENT_HASH=")]
+lignes.append(f"GITHUB_MCP_CONSENT_HASH={empreinte.strip()}")
+with open(chemin, "w", encoding="utf-8") as f:
+    f.write("\n".join(lignes) + "\n")'
+unset HASH
 chown github-app:github-app "$FICHIER"
 chmod 600 "$FICHIER"
 systemctl restart github-mcp-gateway.service

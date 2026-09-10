@@ -2,8 +2,8 @@
 # Affiche les scopes du PAT GitHub interne SANS jamais afficher le token.
 # Usage : sudo bash chemin/du/repo/deploy/inspecter-scopes-pat.sh
 # Sortie : la seule ligne X-OAuth-Scopes (classic) ou une note fine-grained.
-# Le token est lu depuis son fichier 0600 et ne transite jamais en argv
-# (stdin vers python3) : invisible de ps, hors historique, hors logs.
+# Le token est lu par python3 directement dans son fichier 0600 (seul le chemin
+# transite en argv) : invisible de ps, hors historique, hors logs.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then

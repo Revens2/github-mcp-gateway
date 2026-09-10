@@ -893,6 +893,71 @@ def test_etat_corrompu_register_503_json(environ):
     _courir(_t())
 
 
+def test_mcp_oauth_magasin_corrompu_401_pas_500(environ):
+    """Reserve contre-revue : avec etat.json corrompu, un Bearer OAuth (valide
+    avant corruption) donne 401 fail-closed sur /mcp, jamais 500. Le jeton
+    statique, lui, ne depend pas du magasin."""
+
+    async def _t():
+        async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+            r = await c.post(
+                "/register",
+                json={
+                    "client_name": "t",
+                    "redirect_uris": ["https://chatgpt.com/aip/callback"],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "client_secret_post",
+                    "scope": PORTEE,
+                },
+            )
+            assert r.status_code == 201, r.text
+            client = r.json()
+            verifier, challenge = _verifier_s256()
+            r = await c.get(
+                "/authorize",
+                params={
+                    "client_id": client["client_id"],
+                    "redirect_uri": client["redirect_uris"][0],
+                    "response_type": "code",
+                    "code_challenge_method": "S256",
+                    "code_challenge": challenge,
+                    "state": "s",
+                    "scope": PORTEE,
+                },
+            )
+            demande = r.headers["location"].split("demande=", 1)[1]
+            r = await c.post("/consentement", data={"demande": demande, "phrase": PHRASE})
+            assert r.status_code == 302, r.text
+            code = r.headers["location"].split("code=", 1)[1].split("&", 1)[0]
+            r = await c.post(
+                "/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": client["redirect_uris"][0],
+                    "client_id": client["client_id"],
+                    "client_secret": client["client_secret"],
+                    "code_verifier": verifier,
+                },
+            )
+            assert r.status_code == 200, r.text
+            acces = r.json()["access_token"]
+
+            # Corruption APRES emission : seul etat.json (jetons), clients intacts.
+            (environ / "etat.json").write_text("{corrompu", encoding="utf-8")
+
+            r = await c.get("/mcp", headers={"Authorization": f"Bearer {acces}"})
+            assert r.status_code == 401
+
+            # Le jeton statique ne depend pas du magasin : toujours accepte
+            # (la passerelle repond, meme en relais fail-closed sans PAT de test).
+            r = await c.get("/health")
+            assert r.status_code == 200
+
+    _courir(_t())
+
+
 def test_lire_code_expire_fail_closed(tmp_path):
     """Un code d'autorisation expire ne s'echange jamais (defense en
     profondeur, le SDK valide aussi expires_at)."""

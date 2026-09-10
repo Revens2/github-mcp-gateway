@@ -392,7 +392,13 @@ class FournisseurOAuth(
     async def load_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> AuthorizationCode | None:
-        donnees = self._magasin.lire_code(authorization_code)
+        # Magasin illisible => code invalide (401/400 cote SDK), jamais un 500 :
+        # ces lectures tournent dans le middleware d'auth externe, hors du
+        # handler global Starlette.
+        try:
+            donnees = self._magasin.lire_code(authorization_code)
+        except EtatOAuthCorrompu:
+            return None
         if donnees is None or donnees["client_id"] != client.client_id:
             return None
         return AuthorizationCode(
@@ -419,7 +425,10 @@ class FournisseurOAuth(
     async def load_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: str
     ) -> RefreshToken | None:
-        donnees = self._magasin.lire_rafraichissement(refresh_token)
+        try:
+            donnees = self._magasin.lire_rafraichissement(refresh_token)
+        except EtatOAuthCorrompu:
+            return None
         if donnees is None or donnees["client_id"] != client.client_id:
             return None
         return RefreshToken(
@@ -448,7 +457,11 @@ class FournisseurOAuth(
                 scopes=portees_du_jeton_statique(),
                 expires_at=None,
             )
-        donnees = self._magasin.lire_acces(token)
+        donnees = None
+        try:
+            donnees = self._magasin.lire_acces(token)
+        except EtatOAuthCorrompu:
+            donnees = None
         if donnees is None:
             return None
         return AccessToken(
