@@ -146,6 +146,9 @@ def e2e_issue(session: str, repo: str) -> None:
         sys.exit(1)
     import re
     m = re.search(r'"number"\s*:\s*(\d+)', t)
+    if m is None:
+        # Format alternatif : numero en fin d'URL .../issues/<N>.
+        m = re.search(r"/issues/(\d+)", t)
     numero = int(m.group(1)) if m else None
     if numero is None:
         print("issue_write/create: ECHEC -> numero introuvable :", t[:400])
@@ -190,7 +193,34 @@ def e2e_issue(session: str, repo: str) -> None:
         sys.exit(1)
 
 
+def fermer_issue(session: str, repo: str, numero: int) -> None:
+    """Ferme une issue existante (cleanup d'un artefact de test)."""
+    try:
+        proprio, depot = repo.split("/", 1)
+    except ValueError:
+        print("Fermeture         : ECHEC -> --repo doit valoir PROPRIO/DEPOT")
+        sys.exit(1)
+    session, r = appeler(session, 20, "tools/call", {
+        "name": "issue_write",
+        "arguments": {"method": "update", "owner": proprio, "repo": depot,
+                      "issue_number": numero, "state": "closed"},
+    })
+    t = texte(r)
+    if est_erreur(r, t):
+        print("issue_write/close : ECHEC ->", t[:400])
+        sys.exit(1)
+    print(f"issue_write/close : OK -> {repo}#{numero} fermee")
+
+
 def main() -> None:
+    creer = "--create" in sys.argv
+    inventaire = "--inventaire" in sys.argv
+    fermer = 0
+    if "--fermer" in sys.argv:
+        try:
+            fermer = int(sys.argv[sys.argv.index("--fermer") + 1])
+        except (IndexError, ValueError):
+            fermer = 0
     creer = "--create" in sys.argv
     inventaire = "--inventaire" in sys.argv
     repo = ""
@@ -232,6 +262,11 @@ def main() -> None:
     if creer:
         e2e_issue(session, repo)
         print("E2E ECRITURE      : OK (issue creee, relue, fermee)")
+    elif fermer:
+        if not repo:
+            print("Fermeture : --repo PROPRIO/DEPOT obligatoire avec --fermer N.")
+            sys.exit(1)
+        fermer_issue(session, repo, fermer)
     else:
         print("(mode lecture seule : ajouter --create --repo PROPRIO/DEPOT pour l'E2E ecriture)")
 
