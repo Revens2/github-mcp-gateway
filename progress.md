@@ -28,7 +28,11 @@ consentement, E2E (phases 8-10), revue + GO (11-12).
 - Phase 11 (revue 1) : NO-GO conditionnel, 4 bloquants LEVÉS (argv PAT/phrase via
   stdin, EtatOAuthCorrompu→503 + handler global, garde loopback upstream, expiry
   lire_code) + hygiène (venv root, FICHIER_CLIENTS, 5/7 blocs, docstrings).
-  Revalidation : 104 tests verts, val_github lecture verte post-déploiement.
+- Phase 11 (contre-revue delta) : GO avec 1 réserve, LEVÉE (load_* → 401
+  fail-closed hors handler, creer_code sous garde, sed sans argv) + test
+  mcp_oauth_corrompu_401. Revalidation : 105 tests verts, val_github lecture
+  verte post-déploiement. Astra : erreur transitoire HTTP 500, mission continue
+  sans blocage (consigné).
 
 ## À faire
 - [x] Créer le dépôt GitHub `Revens2/github-mcp-gateway` + push.
