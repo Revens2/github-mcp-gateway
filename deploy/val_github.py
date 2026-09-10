@@ -192,6 +192,7 @@ def e2e_issue(session: str, repo: str) -> None:
 
 def main() -> None:
     creer = "--create" in sys.argv
+    inventaire = "--inventaire" in sys.argv
     repo = ""
     if "--repo" in sys.argv:
         try:
@@ -215,7 +216,11 @@ def main() -> None:
     print("initialize        : OK")
 
     session, r = appeler(session, 2, "tools/list", {})
-    verifier_tools_list(r)
+    noms = verifier_tools_list(r)
+    if inventaire:
+        for nom in sorted(noms):
+            print(f"  - {nom}")
+        return
 
     session, r = appeler(session, 3, "tools/call", {"name": "get_me", "arguments": {}})
     t = texte(r)
