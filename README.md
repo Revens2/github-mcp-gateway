@@ -6,7 +6,7 @@ Passerelle d'authentification pour le serveur MCP **GitHub** officiel
 
 Elle n'est **pas** un serveur MCP de plein exercice : elle valide le jeton d'accès
 (OAuth colocalisé ou Bearer statique) puis relaie tel quel le trafic Streamable HTTP
-vers l'upstream (`127.0.0.1:8798`, mode `http --base-path /mcp`). Aucun tool GitHub
+vers l'upstream (`127.0.0.1:8800`, mode `http --base-path /mcp`). Aucun tool GitHub
 n'est réimplémenté ici : catalogue, schémas, appels REST/GraphQL et évolutions
 restent fournis par le serveur officiel.
 
@@ -88,4 +88,4 @@ deploy/
 - Supprimer les 5 blocs `/github` du vhost mymcps, `nginx -t && systemctl reload nginx`.
 - `systemctl disable --now github-mcp-gateway github-mcp-upstream`, supprimer
   `/srv/github` si voulu. Vault/Astra/Tasks/Calendar inchangés (registres,
-  passphrases et scopes séparés, ports distincts 8798/8799).
+  passphrases et scopes séparés, ports distincts 8800/8799).

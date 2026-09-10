@@ -1,4 +1,4 @@
-"""Proxy vers le serveur MCP upstream (github-mcp-server officiel, 127.0.0.1:8798).
+"""Proxy vers le serveur MCP upstream (github-mcp-server officiel, 127.0.0.1:8800).
 
 La passerelle n'est PAS un serveur MCP de plein exercice : elle valide le jeton
 d'acces (OAuth ou Bearer statique) puis relaie le trafic Streamable HTTP vers

@@ -12,7 +12,7 @@ VPS (phases 6-7), PAT humain (phase 5), E2E (phases 8-10), revue + GO (11-12).
 
 ## Fait
 - Phase 1 : 4 audits read-only (RAG, VPS live, serveur officiel, patterns).
-- Phase 2 : décision CAS A documentée (pas de bridge Rust), ports 8798/8799.
+- Phase 2 : décision CAS A documentée (pas de bridge Rust), ports 8800/8799.
 - Phase 3 : repo `github-mcp-gateway` (copie-adaptation calendar), politique 94 tools,
   units systemd ×2, snippet nginx 5 blocs, compose, install, val_github.py, README,
   CI gitleaks+pytest, tests redaction/canary. 96/96 tests gateway+redaction verts
@@ -32,6 +32,8 @@ VPS (phases 6-7), PAT humain (phase 5), E2E (phases 8-10), revue + GO (11-12).
 - PAT dédié MCP (classic si besoin max), séparé du token OAuth ChatGPT.
 - Politique full RW 94/94, admin vide, fail-closed sur inconnu.
 - /srv/github (modèle tasks/astra), secrets 0600, upstream Docker loopback.
+- Ports : upstream **8800** + gateway **8799** (8798 pris par `activity-mcp.service`,
+  résident permanent découvert en live le 2026-09-10 — dérive vs audit) ; 8799 libre.
 
 ## Blocages actifs
 - PAT GitHub : saisie humaine sur le VPS requise (phase 5).

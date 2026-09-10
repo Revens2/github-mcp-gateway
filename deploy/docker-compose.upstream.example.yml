@@ -21,7 +21,7 @@ services:
 
     # Boucle locale stricte uniquement : serveur MCP Streamable HTTP stateless.
     ports:
-      - "127.0.0.1:8798:8082"
+      - "127.0.0.1:8800:8082"
 
     security_opt:
       - no-new-privileges:true

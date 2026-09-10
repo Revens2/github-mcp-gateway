@@ -9,7 +9,7 @@ Group=root
 EnvironmentFile=/srv/github/secrets/upstream.env
 ExecStartPre=-/usr/bin/docker rm -f github-mcp-upstream
 ExecStart=/usr/bin/docker run --rm --name github-mcp-upstream \
-  --publish 127.0.0.1:8798:8082 \
+  --publish 127.0.0.1:8800:8082 \
   --env GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN} \
   --env GITHUB_TOOLSETS=all \
   --env GITHUB_MCP_SERVER_MRTR_STATE_KEY=${GITHUB_MCP_SERVER_MRTR_STATE_KEY} \

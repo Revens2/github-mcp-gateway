@@ -34,7 +34,7 @@ umask 077
 cat > "$APP/secrets/github.env" <<ENV
 GITHUB_MCP_PORT=8799
 GITHUB_MCP_ISSUER=https://mymcps.duckdns.org/oauth/github
-GITHUB_MCP_UPSTREAM=http://127.0.0.1:8798
+GITHUB_MCP_UPSTREAM=http://127.0.0.1:8800
 GITHUB_MCP_TOKEN=${TOKEN}
 GITHUB_MCP_TOKEN_SCOPES=github:lecture github:ecriture
 GITHUB_MCP_OAUTH_DIR=/srv/github/data/oauth

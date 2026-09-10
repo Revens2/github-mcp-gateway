@@ -15,7 +15,7 @@ Preuves (audits Phase 1) :
   OAuth-login et GitHub App = stdio uniquement → PAT obligatoire en `http`.
 - Pattern Titou éprouvé : gateway Python OAuth colocalisé + proxy transparent
   (`calendar-mcp-gateway`, `tasks`, `astra`), nginx mono-vhost `mymcps.duckdns.org`,
-  systemd `EnvironmentFile` 0600 (jamais `LoadCredential`), ports 8798/8799 libres,
+  systemd `EnvironmentFile` 0600 (jamais `LoadCredential`), ports 8800/8799 libres,
   `Requires=` upstream, `stateless` côté ChatGPT.
 
 Donc : **aucun bridge Rust**. Couche propriétaire = gateway Python
@@ -23,7 +23,7 @@ Donc : **aucun bridge Rust**. Couche propriétaire = gateway Python
 
 ```
 ChatGPT Web --HTTPS/OAuth--> mymcps.duckdns.org:443 --/github/mcp-->
-github-mcp-gateway :8799 --127.0.0.1--> github-mcp-upstream :8798
+github-mcp-gateway :8799 --127.0.0.1--> github-mcp-upstream :8800
 (github-mcp-server v1.12.0 http --base-path /mcp, GITHUB_TOOLSETS=all) --> api.github.com
 Token/OAuth ChatGPT = accès AU MCP ; PAT interne = MCP VERS GitHub (jamais exposé).
 ```
