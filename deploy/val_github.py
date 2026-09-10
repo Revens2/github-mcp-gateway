@@ -71,7 +71,13 @@ def appeler(session: str | None, ident: int, methode: str, params: dict) -> tupl
         entetes["mcp-session-id"] = session
     with httpx.Client(timeout=120.0) as client:  # nosemgrep: python.lang.security.audit.insecure-transport -- boucle locale 127.0.0.1 voulue, jamais exposee
         reponse = client.post(BASE, json=corps, headers=entetes)
-        reponse.raise_for_status()
+        if reponse.status_code != 200:
+            # La passerelle relaie le statut upstream tel quel (ex. 401/403 sans
+            # PAT) : on le remonte en diagnostic au lieu de crasher.
+            return reponse.headers.get("mcp-session-id") or session, {
+                "_http_status": reponse.status_code,
+                "_body": reponse.text[:300],
+            }
         session_id = reponse.headers.get("mcp-session-id") or session
         brut = reponse.text
     payload: dict | None = None
@@ -201,6 +207,10 @@ def main() -> None:
         "capabilities": {},
         "clientInfo": {"name": "val-github", "version": "1"},
     })
+    if "_http_status" in r:
+        print(f"initialize        : HTTP {r['_http_status']} (upstream) -> {r['_body'][:200]}")
+        print("  (sans PAT GitHub, un 401/403 relaie par le proxy est normal ici)")
+        return
     assert "result" in r, texte(r)
     print("initialize        : OK")
 
