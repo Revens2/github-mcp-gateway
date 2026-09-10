@@ -20,6 +20,7 @@ from starlette.routing import Route
 from github_gateway.oauth import (
     PORTEE,
     PORTEE_ECRITURE,
+    EtatOAuthCorrompu,
     FournisseurOAuth,
     verifier_phrase,
 )
@@ -110,6 +111,16 @@ def _rediriger(demande: dict[str, Any], code: str) -> RedirectResponse:
     return RedirectResponse(cible, status_code=302)
 
 
+def _indisponible() -> HTMLResponse:
+    """Magasin OAuth illisible : 503 explicite, jamais un 500 brut."""
+    return HTMLResponse(
+        "<p>Magasin d'autorisation indisponible (etat corrompu). "
+        "Prevenez l'administrateur : un redemarrage ne suffit pas, "
+        "le fichier d'etat doit etre inspecte.</p>",
+        status_code=503,
+    )
+
+
 def routes_consentement(fournisseur: FournisseurOAuth) -> list[Route]:
     """Routes GET/POST `/consentement`, branchees sur le magasin du fournisseur."""
 
@@ -117,7 +128,10 @@ def routes_consentement(fournisseur: FournisseurOAuth) -> list[Route]:
         identifiant = request.query_params.get("demande", "")
         # On ne consomme pas la demande a l'affichage : seul le POST la retire, sinon un
         # rafraichissement de page rendrait le consentement impossible.
-        demande = fournisseur.magasin._etat()["demandes"].get(identifiant)
+        try:
+            demande = fournisseur.magasin._etat()["demandes"].get(identifiant)
+        except EtatOAuthCorrompu:
+            return _indisponible()
         if not demande:
             return HTMLResponse(
                 "<p>Demande inconnue ou expiree. Relancez la connexion depuis le client.</p>",
@@ -144,7 +158,10 @@ def routes_consentement(fournisseur: FournisseurOAuth) -> list[Route]:
                 status_code=503,
             )
 
-        apercu = fournisseur.magasin._etat()["demandes"].get(identifiant)
+        try:
+            apercu = fournisseur.magasin._etat()["demandes"].get(identifiant)
+        except EtatOAuthCorrompu:
+            return _indisponible()
         if not apercu:
             return HTMLResponse(
                 "<p>Demande inconnue ou expiree. Relancez la connexion depuis le client.</p>",
@@ -160,7 +177,10 @@ def routes_consentement(fournisseur: FournisseurOAuth) -> list[Route]:
             )
 
         # Consommee seulement maintenant : un consentement ne se rejoue pas.
-        demande = fournisseur.magasin.prendre_demande(identifiant)
+        try:
+            demande = fournisseur.magasin.prendre_demande(identifiant)
+        except EtatOAuthCorrompu:
+            return _indisponible()
         if demande is None:
             return HTMLResponse("<p>Demande expiree pendant la saisie.</p>", status_code=404)
 

@@ -2,6 +2,8 @@
 # Affiche les scopes du PAT GitHub interne SANS jamais afficher le token.
 # Usage : sudo bash chemin/du/repo/deploy/inspecter-scopes-pat.sh
 # Sortie : la seule ligne X-OAuth-Scopes (classic) ou une note fine-grained.
+# Le token est lu depuis son fichier 0600 et ne transite jamais en argv
+# (stdin vers python3) : invisible de ps, hors historique, hors logs.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -12,9 +14,26 @@ fi
 FICHIER=/srv/github/secrets/github-pat
 [ -s "$FICHIER" ] || { echo "PAT absent ou vide : $FICHIER" >&2; exit 1; }
 
-SCOPES=$(curl -sI -H "Authorization: Bearer $(cat "$FICHIER")" https://api.github.com/user | grep -i '^x-oauth-scopes:' || true)
+SCOPES=$(python3 - "$FICHIER" <<'PY'
+import sys
+import urllib.request
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    pat = f.read().strip()
+req = urllib.request.Request(
+    "https://api.github.com/user",
+    headers={"Authorization": f"Bearer {pat}", "User-Agent": "github-mcp-gateway-inspect"},
+)
+try:
+    with urllib.request.urlopen(req, timeout=30) as rep:
+        print(rep.headers.get("X-OAuth-Scopes", ""))
+except Exception as exc:  # panne reseau/API : diagnostic sans secret
+    print(f"ERREUR-API:{exc.__class__.__name__}", file=sys.stderr)
+    sys.exit(1)
+PY
+)
 if [ -n "$SCOPES" ]; then
-    echo "PAT classic — scopes : $SCOPES"
+    echo "PAT classic — scopes : x-oauth-scopes: $SCOPES"
 else
     echo "Pas de X-OAuth-Scopes : PAT fine-grained probable (permissions via l'UI GitHub)."
 fi

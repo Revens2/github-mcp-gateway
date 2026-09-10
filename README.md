@@ -97,7 +97,7 @@ deploy/
 
 ## Rollback
 
-- Supprimer les 5 blocs `/github` du vhost mymcps, `nginx -t && systemctl reload nginx`.
+- Supprimer les 7 blocs `/github` du vhost mymcps (marqués `# github-mcp-gateway`), `nginx -t && systemctl reload nginx`.
 - `systemctl disable --now github-mcp-gateway github-mcp-upstream`, supprimer
   `/srv/github` si voulu. Vault/Astra/Tasks/Calendar inchangés (registres,
   passphrases et scopes séparés, ports distincts 8800/8799).

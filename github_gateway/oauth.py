@@ -38,10 +38,9 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-REPERTOIRE_DEFAUT = Path("/srv/github/oauth")
+REPERTOIRE_DEFAUT = Path("/srv/github/data/oauth")
 # Le registre vit DANS le repertoire oauth : c'est le seul chemin, avec le code, que
-# l'unite systemd laisse en ecriture (ProtectSystem=strict).
-FICHIER_CLIENTS = Path("/srv/github/oauth/clients.json")
+# l'unite systemd laisse en ecriture (ProtectSystem=strict, ReadWritePaths=data).
 
 PORTEE = "github:lecture"
 # Portee d'ECRITURE, distincte et jamais accordee par defaut (a l'inscription). La page
@@ -299,7 +298,12 @@ class MagasinOAuth:
         self._modifier_etat(_poser)
 
     def lire_code(self, code: str) -> dict[str, Any] | None:
-        return self._etat()["codes"].get(code)
+        donnees = self._etat()["codes"].get(code)
+        # Defense en profondeur (le SDK valide aussi expires_at) : un code expire
+        # ne s'echange jamais, comme prendre_demande et lire_acces.
+        if donnees is None or donnees.get("expire_a", 0) <= int(time.time()):
+            return None
+        return donnees
 
     def retirer_code(self, code: str) -> None:
         self._modifier_etat(lambda etat: etat["codes"].pop(code, None))

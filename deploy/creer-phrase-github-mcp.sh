@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pose la phrase de passe du consentement de la passerelle GitHub.
-# Seule l'empreinte PBKDF2 est ecrite dans /opt/github-mcp/github.env (0600).
+# Seule l'empreinte PBKDF2 est ecrite dans /srv/github/secrets/github.env (0600).
 # A executer sur le VPS :  sudo bash chemin/du/repo/deploy/creer-phrase-github-mcp.sh
 # La phrase est saisie sans echo, jamais transmise a l'agent, jamais ecrite en clair.
 set -euo pipefail
@@ -23,8 +23,11 @@ if [ "${#P1}" -lt 12 ]; then
     exit 1
 fi
 
-HASH=$(PYTHONPATH="$APP" "$VENV/bin/python" -c \
-    'import sys; from github_gateway.oauth import hacher_phrase; print(hacher_phrase(sys.argv[1]))' "$P1")
+# La phrase transite par stdin (jamais en argv : invisible de ps), puis les
+# variables sont detruites.
+HASH=$(printf '%s' "$P1" | PYTHONPATH="$APP" "$VENV/bin/python" -c \
+    'import sys; from github_gateway.oauth import hacher_phrase; print(hacher_phrase(sys.stdin.read()))')
+unset P1 P2
 
 if grep -q '^GITHUB_MCP_CONSENT_HASH=' "$FICHIER"; then
     sed -i "s|^GITHUB_MCP_CONSENT_HASH=.*|GITHUB_MCP_CONSENT_HASH=$HASH|" "$FICHIER"

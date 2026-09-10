@@ -841,3 +841,69 @@ def test_sante(environ):
             assert JETON_ECRITURE not in r.text
 
     _courir(_t())
+
+
+def test_upstream_non_loopback_refuse_au_demarrage(environ, monkeypatch):
+    """Garde-fou anti-exfiltration : le PAT interne part en Bearer vers
+    l'upstream, donc tout host hors boucle locale refuse le demarrage."""
+    for mauvais in ("http://10.0.0.1:8800", "http://93.184.216.34/", "http://example.com/mcp"):
+        monkeypatch.setenv("GITHUB_MCP_UPSTREAM", mauvais)
+        with pytest.raises(RuntimeError):
+            construire_application()
+    for bon in ("http://127.0.0.1:8800", "http://localhost:8800", "http://[::1]:8800"):
+        monkeypatch.setenv("GITHUB_MCP_UPSTREAM", bon)
+        construire_application(jeton_statique=JETON_ECRITURE)
+
+
+def test_etat_corrompu_consentement_503(environ):
+    """Magasin illisible : /consentement repond 503 explicite, jamais 500."""
+    (environ / "etat.json").write_text("{corrompu", encoding="utf-8")
+
+    async def _t():
+        async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+            r = await c.get("/consentement?demande=x")
+            assert r.status_code == 503
+            r = await c.post("/consentement", data={"demande": "x", "phrase": "y"})
+            assert r.status_code == 503
+
+    _courir(_t())
+
+
+def test_etat_corrompu_register_503_json(environ):
+    """Magasin illisible : meme les routes SDK repondent 503 JSON via le
+    handler global (pas de 500 brut)."""
+    (environ / "clients.json").write_text("{corrompu", encoding="utf-8")
+
+    async def _t():
+        async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+            r = await c.post(
+                "/register",
+                json={
+                    "client_name": "t",
+                    "redirect_uris": ["https://chatgpt.com/aip/callback"],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "client_secret_post",
+                    "scope": PORTEE,
+                },
+            )
+            assert r.status_code == 503
+            assert "credential store unavailable" in r.text
+
+    _courir(_t())
+
+
+def test_lire_code_expire_fail_closed(tmp_path):
+    """Un code d'autorisation expire ne s'echange jamais (defense en
+    profondeur, le SDK valide aussi expires_at)."""
+    from github_gateway.oauth import MagasinOAuth
+
+    magasin = MagasinOAuth(repertoire=tmp_path)
+    magasin.poser_code("c1", {"client_id": "x"})
+    assert magasin.lire_code("c1") is not None
+
+    def _vieillir(etat):
+        etat["codes"]["c1"]["expire_a"] = 1
+
+    magasin._modifier_etat(_vieillir)
+    assert magasin.lire_code("c1") is None

@@ -14,6 +14,7 @@ Tout le reste repond 404 : la passerelle n'expose que ce qui doit l'etre.
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
 from mcp.server.auth.provider import ProviderTokenVerifier
@@ -31,7 +32,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from github_gateway.consentement import routes_consentement
-from github_gateway.oauth import PORTEE, PORTEES, FournisseurOAuth, MagasinOAuth
+from github_gateway.oauth import PORTEE, PORTEES, EtatOAuthCorrompu, FournisseurOAuth, MagasinOAuth
 from github_gateway.politique import PolitiqueOutils
 from github_gateway.upstream import ProxyMCP
 
@@ -75,6 +76,14 @@ def _config() -> tuple[str, str, int, str, str]:
     upstream = _requise("GITHUB_MCP_UPSTREAM")
     if not upstream.startswith("http://"):
         raise RuntimeError("GITHUB_MCP_UPSTREAM doit etre en HTTP (boucle locale)")
+    # Garde-fou anti-exfiltration : le PAT interne est injecte en Bearer vers
+    # l'upstream, donc l'upstream DOIT rester en boucle locale. Une coquille
+    # (host externe) refuserait sinon d'envoyer le PAT hors du VPS.
+    hote = urlparse(upstream).hostname or ""
+    if hote not in ("127.0.0.1", "localhost", "::1"):
+        raise RuntimeError(
+            f"GITHUB_MCP_UPSTREAM doit viser la boucle locale (127.0.0.1), pas {hote!r}"
+        )
     port = int(os.environ.get("GITHUB_MCP_PORT", str(PORT_PAR_DEFAUT)))
     jeton = os.environ.get("GITHUB_MCP_TOKEN", "")
     if jeton and len(jeton) < 32:
@@ -164,6 +173,16 @@ def construire_application(
     ]
 
     application = Starlette(routes=routes)
+
+    async def _etat_corrompu(_: Request, __: Exception) -> JSONResponse:
+        # Magasin OAuth illisible (etat.json corrompu) : 503 explicite partout
+        # (/token, /register, /mcp via le SDK...), jamais un 500 brut.
+        return JSONResponse(
+            {"error": "credential store unavailable"},
+            status_code=503,
+        )
+
+    application.add_exception_handler(EtatOAuthCorrompu, _etat_corrompu)
     # L'AuthenticationMiddleware peuplie scope["user"]/scope["auth"] sur toutes les
     # requetes ; RequireAuthMiddleware (sur /mcp) refuse ensuite sans jeton valide.
     # Le controle fin lecture/ecriture par outil est applique dans ProxyMCP (politique),

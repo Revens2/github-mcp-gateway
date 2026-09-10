@@ -25,8 +25,10 @@ cp -r "$SRC"/tests/* "$APP/tests/" 2>/dev/null || true
 
 python3 -m venv "$APP/venv"
 "$APP/venv/bin/pip" install -q --disable-pip-version-check -r "$APP/requirements.txt"
-chown -R root:juliann "$APP/github_gateway" "$APP/requirements.txt"
-chown -R github-app:github-app "$APP/data" "$APP/venv"
+# Code + venv appartenant a root : le compte de service ne peut pas reecrire son
+# propre code (persistance anti-compromission). Seul data/ lui est accessible.
+chown -R root:root "$APP/github_gateway" "$APP/requirements.txt" "$APP/venv"
+chown -R github-app:github-app "$APP/data"
 
 # --- environnement gateway (secrets generes sur place, jamais affiches) ---------
 TOKEN=$("$APP/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')
@@ -76,7 +78,7 @@ cp "$SRC/deploy/github-mcp-gateway.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable github-mcp-upstream.service github-mcp-gateway.service
 echo "OK : fichiers installes. Etapes suivantes (voir README) :"
-echo "  1. saisir PAT + MRTR dans $APP/secrets/upstream.env (0600)"
+echo "  1. PAT via $SRC/deploy/saisir-pat-github.sh + MRTR via $SRC/deploy/saisir-mrtr-upstream.sh"
 echo "  2. sudo bash $SRC/deploy/creer-phrase-github-mcp.sh (phrase consentement)"
-echo "  3. inserer deploy/nginx-mymcps-github-snippet.conf dans mymcps.duckdns.org.conf"
+echo "  3. sudo python3 $SRC/deploy/ajouter-blocs-nginx.py --appliquer (nginx)"
 echo "  4. systemctl start github-mcp-upstream && valider, puis start gateway"

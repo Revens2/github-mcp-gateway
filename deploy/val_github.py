@@ -221,8 +221,6 @@ def main() -> None:
             fermer = int(sys.argv[sys.argv.index("--fermer") + 1])
         except (IndexError, ValueError):
             fermer = 0
-    creer = "--create" in sys.argv
-    inventaire = "--inventaire" in sys.argv
     repo = ""
     if "--repo" in sys.argv:
         try:
