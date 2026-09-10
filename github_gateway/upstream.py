@@ -6,6 +6,21 @@ l'upstream. Les sessions MCP restent la propriete de l'upstream : l'en-tete
 `mcp-session-id` est transmis sans modification dans les deux sens, ce qui rend
 le proxy invisible pour le protocole.
 
+Credential GitHub : l'upstream officiel en mode `http` exige un `Authorization:
+Bearer <PAT>` PAR REQUETE (constate dans pkg/http/middleware/token.go v1.12.0 :
+sans cet en-tete il repond 401, la variable d'environnement
+GITHUB_PERSONAL_ACCESS_TOKEN n'est utilisee qu'en stdio). La passerelle injecte
+donc elle-meme cet en-tete, lu depuis un fichier 0600 dedie (jamais depuis le
+client, jamais vers le client) :
+- l'`Authorization` du client (OAuth ChatGPT / Bearer statique) n'est JAMAIS
+  retransmis a l'upstream (hors allowlist) ;
+- seul le PAT interne, charge au demarrage depuis GITHUB_MCP_UPSTREAM_TOKEN_FILE,
+  est envoye a l'upstream, en boucle locale uniquement ;
+- sans PAT configure : la passerelle demarre quand meme (OAuth/discovery
+  testables) mais tout relais est refuse en fail-closed (-32000), l'upstream
+  n'est jamais contacte.
+
+
 Autorisation (politique explicite, voir `politique.py`) appliquee AVANT l'envoi
 vers l'upstream, sur la base des portees du jeton deja valide par le gateway :
 
@@ -142,10 +157,33 @@ async def _relayer_flux(send: Send, reponse: httpx.Response) -> None:
 class ProxyMCP:
     """Endpoint ASGI : /mcp authentifie (par le middleware) puis relaye vers l'upstream."""
 
-    def __init__(self, base_url: str, politique: PolitiqueOutils | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        politique: PolitiqueOutils | None = None,
+        jeton_upstream: str | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._politique = politique or PolitiqueOutils()
+        self._jeton_upstream = (jeton_upstream or "").strip() or None
         self._client: httpx.AsyncClient | None = None
+
+    @property
+    def upstream_auth_configure(self) -> bool:
+        """Vrai si le credential GitHub interne est charge (jamais sa valeur)."""
+        return self._jeton_upstream is not None
+
+    def _entetes_upstream(self, scope: Scope) -> dict[str, str]:
+        """En-tetes autorises + injection du credential GitHub interne.
+
+        L'en-tete `Authorization` du client n'est jamais repris (hors allowlist
+        de `_entetes`) : seul le PAT interne est envoye, et uniquement vers
+        l'upstream en boucle locale.
+        """
+        entetes = _entetes(scope)
+        if self._jeton_upstream is not None:
+            entetes["authorization"] = f"Bearer {self._jeton_upstream}"
+        return entetes
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -305,9 +343,22 @@ class ProxyMCP:
                 if refuse_localement:
                     return
 
+        if self._jeton_upstream is None:
+            # Fail-closed : sans credential GitHub, aucun relais (l'upstream
+            # repondrait 401 de toute facon). OAuth/discovery restent servies.
+            await _envoyer_reponse_json(
+                send, 200,
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32000, "message": "credential GitHub non configure cote passerelle (fail-closed)"},
+                    "id": None,
+                },
+            )
+            return
+
         try:
             requete = self._http().build_request(
-                methode, url, headers=_entetes(scope), content=corps
+                methode, url, headers=self._entetes_upstream(scope), content=corps
             )
             reponse = await self._http().send(requete, stream=True)
         except httpx.HTTPError as exc:

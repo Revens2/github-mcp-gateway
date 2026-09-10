@@ -66,17 +66,29 @@ deploy/
 1. Créer un **PAT dédié au MCP** (classic si les toolsets voulus dépassent le
    fine-grained, sinon fine-grained `All repositories`). Scopes minimaux pour le
    maximum fonctionnel : voir § Profil d'outils.
-2. Sur le VPS, en root : saisir le PAT + générer la clé MRTR **dans le terminal
-   uniquement** (jamais dans le chat, jamais en argument de commande) :
+2. Sur le VPS, en root : écrire le PAT **dans le terminal uniquement**
+   (jamais dans le chat, jamais en argument de commande) puis générer la clé MRTR :
    ```bash
    umask 077
    read -r -s -p "PAT GitHub : " PAT; echo
+   printf '%s' "$PAT" > /srv/github/secrets/github-pat
+   chown github-app:github-app /srv/github/secrets/github-pat
+   chmod 600 /srv/github/secrets/github-pat
+   unset PAT
    MRTR=$(openssl rand -base64 32 | tr -d '\n')
-   printf 'GITHUB_PERSONAL_ACCESS_TOKEN=%s\nGITHUB_MCP_SERVER_MRTR_STATE_KEY=%s\n' \
-     "$PAT" "$MRTR" > /srv/github/secrets/upstream.env
-   chown root:github-app /srv/github/secrets/upstream.env; chmod 600 /srv/github/secrets/upstream.env
-   unset PAT MRTR
+   printf 'GITHUB_MCP_SERVER_MRTR_STATE_KEY=%s\nGITHUB_TOOLSETS=all\n' "$MRTR" \
+     > /srv/github/secrets/upstream.env
+   chown root:root /srv/github/secrets/upstream.env
+   chmod 600 /srv/github/secrets/upstream.env
+   unset MRTR
+   systemctl restart github-mcp-upstream github-mcp-gateway
    ```
+   Pourquoi ce montage : l'upstream officiel en mode `http` exige un
+   `Authorization: Bearer` **par requête** et ignore `GITHUB_PERSONAL_ACCESS_TOKEN`
+   (constaté dans `pkg/http/middleware/token.go` v1.12.0). C'est donc la passerelle
+   qui injecte le PAT — lu depuis `github-pat` (0600), jamais loggé, jamais renvoyé
+   (`/health` n'expose que `upstream_auth: configure|missing`), jamais transmis à
+   ChatGPT ; l'`Authorization` du client n'est jamais retransmis à l'upstream.
 3. Poser la phrase de consentement : `sudo bash deploy/creer-phrase-github-mcp.sh`.
 4. `systemctl start github-mcp-upstream github-mcp-gateway`, puis
    `sudo /srv/github/venv/bin/python deploy/val_github.py` (lecture) et

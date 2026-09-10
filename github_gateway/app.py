@@ -42,6 +42,24 @@ CHEMIN_MCP = "/mcp"
 POLITIQUE = PolitiqueOutils()
 
 
+def _lire_jeton_upstream() -> str | None:
+    """Lit le PAT GitHub interne depuis son fichier dedie (0600).
+
+    Retourne ``None`` si non configure : la passerelle demarre quand meme mais
+    refuse tout relais en fail-closed. La valeur n'est jamais loggee ni exposee
+    (voir /health : statut configure/missing uniquement).
+    """
+    chemin = os.environ.get("GITHUB_MCP_UPSTREAM_TOKEN_FILE", "").strip()
+    if not chemin:
+        return None
+    try:
+        with open(chemin, encoding="utf-8") as f:
+            valeur = f.read().strip()
+    except OSError:
+        return None
+    return valeur or None
+
+
 def _config() -> tuple[str, str, int, str, str]:
     """(emetteur, upstream, port, jeton statique, repertoire oauth)."""
 
@@ -64,14 +82,19 @@ def _config() -> tuple[str, str, int, str, str]:
     return emetteur, upstream, port, jeton, os.environ.get("GITHUB_MCP_OAUTH_DIR", "")
 
 
-def _sante(_: Request) -> JSONResponse:
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "github-mcp-gateway",
-            "mcp": CHEMIN_MCP,
-        }
-    )
+def _sante(proxy: ProxyMCP):
+    async def _handler(_: Request) -> JSONResponse:
+        return JSONResponse(
+            {
+                "status": "ok",
+                "service": "github-mcp-gateway",
+                "mcp": CHEMIN_MCP,
+                # Statut du credential GitHub, jamais sa valeur.
+                "upstream_auth": "configure" if proxy.upstream_auth_configure else "missing",
+            }
+        )
+
+    return _handler
 
 
 def _defaut(_: Request) -> PlainTextResponse:
@@ -83,19 +106,25 @@ def construire_application(
     upstream: str | None = None,
     jeton_statique: str | None = None,
     repertoire_oauth: str | None = None,
+    jeton_upstream: str | None = None,
 ) -> Starlette:
-    """Construit l'application. Les parametres remplacent l'environnement (tests)."""
+    """Construit l'application. Les parametres remplacent l'environnement (tests).
+
+    ``jeton_upstream`` (PAT GitHub interne) : si ``None``, lu depuis
+    ``GITHUB_MCP_UPSTREAM_TOKEN_FILE`` ; ``""`` force l'absence (tests)."""
     emetteur_reel, upstream_reel, _, jeton_reel, oauth_reel = _config()
     emetteur = (emetteur or emetteur_reel).rstrip("/")
     upstream = upstream or upstream_reel
     jeton = jeton_statique if jeton_statique is not None else jeton_reel
+    if jeton_upstream is None:
+        jeton_upstream = _lire_jeton_upstream()
 
     fournisseur = FournisseurOAuth(
         emetteur,
         magasin=MagasinOAuth(repertoire=repertoire_oauth) if repertoire_oauth else None,
         jeton_statique=jeton,
     )
-    proxy = ProxyMCP(upstream, politique=POLITIQUE)
+    proxy = ProxyMCP(upstream, politique=POLITIQUE, jeton_upstream=jeton_upstream or None)
     # Ressource MCP publique : l'issuer est path-scope (/oauth/{svc}) mais la
     # ressource est racine (/github/mcp) — pattern live astra/tasks/calendar :
     # resource = issuer sans "/oauth" + "/mcp". La route PRM du SDK en derive
@@ -120,7 +149,7 @@ def construire_application(
             resource_name="GitHub MCP (passerelle)",
         ),
         *routes_consentement(fournisseur),
-        Route("/health", _sante, methods=["GET"]),
+        Route("/health", _sante(proxy), methods=["GET"]),
         Route(
             CHEMIN_MCP,
             endpoint=RequireAuthMiddleware(

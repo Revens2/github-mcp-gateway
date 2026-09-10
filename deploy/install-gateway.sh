@@ -38,20 +38,33 @@ GITHUB_MCP_UPSTREAM=http://127.0.0.1:8800
 GITHUB_MCP_TOKEN=${TOKEN}
 GITHUB_MCP_TOKEN_SCOPES=github:lecture github:ecriture
 GITHUB_MCP_OAUTH_DIR=/srv/github/data/oauth
+GITHUB_MCP_UPSTREAM_TOKEN_FILE=/srv/github/secrets/github-pat
 ENV
 chown github-app:github-app "$APP/secrets/github.env"
 chmod 600 "$APP/secrets/github.env"
 unset TOKEN
 
-# --- fichier upstream (PAT + MRTR) : squelette 0600, valeurs saisies ensuite -----
+# --- PAT GitHub interne : fichier dedie 0600 (squelette vide, valeur saisie ensuite)
+# La passerelle l'injecte en Bearer vers l'upstream (http exige un Authorization
+# par requete) ; l'Authorization du client n'est jamais retransmis.
+if [ ! -f "$APP/secrets/github-pat" ]; then
+    : > "$APP/secrets/github-pat"
+    chown github-app:github-app "$APP/secrets/github-pat"
+    chmod 600 "$APP/secrets/github-pat"
+    echo "Squelette $APP/secrets/github-pat cree (0600, vide) : y ecrire le PAT (voir README)."
+else
+    echo "$APP/secrets/github-pat existe deja : inchange."
+fi
+
+# --- fichier upstream (MRTR) : squelette 0600, valeur saisie ensuite ------------
 if [ ! -f "$APP/secrets/upstream.env" ]; then
     cat > "$APP/secrets/upstream.env" <<ENV
-GITHUB_PERSONAL_ACCESS_TOKEN=
 GITHUB_MCP_SERVER_MRTR_STATE_KEY=
+GITHUB_TOOLSETS=all
 ENV
-    chown root:github-app "$APP/secrets/upstream.env"
+    chown root:root "$APP/secrets/upstream.env"
     chmod 600 "$APP/secrets/upstream.env"
-    echo "Squelette $APP/secrets/upstream.env cree (0600) : saisir PAT + MRTR (voir README)."
+    echo "Squelette $APP/secrets/upstream.env cree (0600) : saisir la cle MRTR (voir README)."
 else
     echo "$APP/secrets/upstream.env existe deja : inchange."
 fi

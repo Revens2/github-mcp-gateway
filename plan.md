@@ -28,6 +28,15 @@ github-mcp-gateway :8799 --127.0.0.1--> github-mcp-upstream :8800
 Token/OAuth ChatGPT = accès AU MCP ; PAT interne = MCP VERS GitHub (jamais exposé).
 ```
 
+**Correctif 2026-09-10 (preuve par le code) :** l'upstream `http` exige un
+`Authorization: Bearer` **par requête** (`pkg/http/middleware/token.go` :
+401 sans cet en-tête, `GITHUB_PERSONAL_ACCESS_TOKEN` ignoré — env réservé au
+stdio). C'est donc la **passerelle** qui injecte le PAT, lu depuis
+`/srv/github/secrets/github-pat` (0600) : l'`Authorization` client n'est jamais
+retransmis, le PAT n'est jamais loggé/renvoyé (`/health` : `configure|missing`
+uniquement), sans PAT tout relais est refusé en fail-closed (-32000) mais
+OAuth/discovery restent servis. CAS A inchangé (toujours aucun bridge Rust).
+
 ## Registre des choix
 
 - Upstream : Docker officiel pinné `v1.12.0` (+ digest relevé au pull), `--base-path /mcp`

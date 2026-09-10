@@ -39,6 +39,8 @@ from github_gateway.politique import OUTILS_ADMIN, OUTILS_ECRITURE, OUTILS_LECTU
 EMETTEUR = "https://github.example.test"
 JETON_LECTURE = "l" * 40
 JETON_ECRITURE = "e" * 40
+# PAT GitHub interne factice (injecte vers l'upstream, jamais expose au client).
+PAT_UPSTREAM = "p" * 40
 PHRASE = "phrase-de-test-2026"
 SCOPES_LECTURE = "github:lecture"
 SCOPES_ECRITURE = "github:lecture github:ecriture"
@@ -58,14 +60,16 @@ def environ(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _app(jeton: str, portees: str):
-    """Application construite pour un jeton statique portant exactement `portees`."""
+def _app(jeton: str, portees: str, pat: str | None = PAT_UPSTREAM):
+    """Application construite pour un jeton statique portant exactement `portees`.
+
+    `pat` : PAT interne injecte vers l'upstream (``""`` = absence, fail-closed)."""
     os.environ["GITHUB_MCP_TOKEN_SCOPES"] = portees
-    return construire_application(jeton_statique=jeton)
+    return construire_application(jeton_statique=jeton, jeton_upstream=pat)
 
 
-def _client(jeton: str, portees: str) -> httpx.AsyncClient:
-    app = _app(jeton, portees)
+def _client(jeton: str, portees: str, pat: str | None = PAT_UPSTREAM) -> httpx.AsyncClient:
+    app = _app(jeton, portees, pat)
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=EMETTEUR)
 
 
@@ -299,7 +303,9 @@ def _serveur_stub(outils: list[str] | None = None) -> tuple[uvicorn.Server, str,
     """Upstream factice : initialize/session, tools/list, tools/call comptabilises.
 
     Retourne (serveur, url, socket, recus) ou `recus` recoit chaque tools/call
-    relaye par le proxy : {"name": ..., "id": ...}.
+    relaye par le proxy : {"name": ..., "id": ..., "authorization": ...} (en-tete
+    Authorization vu par l'upstream, pour prouver l'injection du PAT interne et
+    la non-retransmission du jeton client).
     """
     import socket
     import time
@@ -318,6 +324,14 @@ def _serveur_stub(outils: list[str] | None = None) -> tuple[uvicorn.Server, str,
 
         corps = await request.body()
         donnees = json.loads(corps)
+        # L'upstream officiel exige le PAT interne en Bearer par requete : le stub
+        # l'exige aussi, ce qui prouve a la fois l'injection et la
+        # non-retransmission du jeton client (un jeton client transite => 401).
+        if request.headers.get("authorization", "") != f"Bearer {PAT_UPSTREAM}":
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": donnees.get("id"), "error": {"code": -32001, "message": "credential upstream attendu"}},
+                status_code=401,
+            )
         methode = donnees.get("method")
         id_ = donnees.get("id")
         session = request.headers.get("mcp-session-id", "")
@@ -341,7 +355,11 @@ def _serveur_stub(outils: list[str] | None = None) -> tuple[uvicorn.Server, str,
             )
         if methode == "tools/call":
             params = donnees.get("params") or {}
-            recus.append({"name": params.get("name"), "id": id_})
+            recus.append({
+                "name": params.get("name"),
+                "id": id_,
+                "authorization": request.headers.get("authorization", ""),
+            })
             return _reponse(
                 {"jsonrpc": "2.0", "id": id_, "result": {"content": [{"type": "text", "text": "ok"}]}},
                 session,
@@ -754,11 +772,72 @@ def test_tools_list_masque_ecriture_sans_portee_ecriture(environ):
     _courir(_t())
 
 
+def test_injection_pat_et_non_retransmission_jeton_client(environ):
+    """Le proxy injecte le PAT interne vers l'upstream et ne retransmet jamais
+    le jeton client (le stub refuse tout Bearer != PAT : un relais reussi prouve
+    les deux, et l'en-tete vu est consigne dans `recus`)."""
+
+    async def _t():
+        serveur, url, _socket_ecoute, recus = _serveur_stub()
+        try:
+            os.environ["GITHUB_MCP_UPSTREAM"] = url
+            async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+                entetes = _entetes_autorises(JETON_ECRITURE)
+                r = await c.post("/mcp", content=_json_rpc("initialize", 1), headers=entetes)
+                session = r.headers["mcp-session-id"]
+                r = await c.post(
+                    "/mcp",
+                    content=_json_rpc("tools/call", 7, {"name": "create_branch", "arguments": {}}),
+                    headers={**entetes, "mcp-session-id": session},
+                )
+                assert r.status_code == 200
+                assert "ok" in r.text
+                assert len(recus) == 1
+                assert recus[0]["authorization"] == f"Bearer {PAT_UPSTREAM}"
+                assert JETON_ECRITURE not in recus[0]["authorization"]
+        finally:
+            serveur.should_exit = True
+            if _socket_ecoute:
+                _socket_ecoute.close()
+
+    _courir(_t())
+
+
+def test_sans_pat_fail_closed_sans_contacter_upstream(environ):
+    """Sans PAT interne : relais refuse en fail-closed (-32000), upstream jamais
+    contacte, OAuth/discovery toujours servis."""
+
+    async def _t():
+        serveur, url, _socket_ecoute, recus = _serveur_stub()
+        try:
+            os.environ["GITHUB_MCP_UPSTREAM"] = url
+            async with _client(JETON_ECRITURE, SCOPES_ECRITURE, pat="") as c:
+                entetes = _entetes_autorises(JETON_ECRITURE)
+                r = await c.post("/mcp", content=_json_rpc("initialize", 1), headers=entetes)
+                assert r.status_code == 200
+                corps = r.json()
+                assert "error" in corps and corps["error"]["code"] == -32000
+                assert "non configure" in corps["error"]["message"]
+                assert recus == [], "l'upstream ne doit pas etre contacte sans PAT"
+                r = await c.get("/health")
+                assert r.json()["upstream_auth"] == "missing"
+        finally:
+            serveur.should_exit = True
+            if _socket_ecoute:
+                _socket_ecoute.close()
+
+    _courir(_t())
+
+
 def test_sante(environ):
     async def _t():
         async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
             r = await c.get("/health")
             assert r.status_code == 200
             assert r.json()["status"] == "ok"
+            # Statut du credential, jamais sa valeur.
+            assert r.json()["upstream_auth"] == "configure"
+            assert PAT_UPSTREAM not in r.text
+            assert JETON_ECRITURE not in r.text
 
     _courir(_t())

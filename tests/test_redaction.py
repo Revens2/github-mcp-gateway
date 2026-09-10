@@ -31,6 +31,7 @@ from github_gateway.politique import OUTILS_ECRITURE, OUTILS_LECTURE
 
 EMETTEUR = "https://github.example.test"
 CANARY_JETON = "canary-" + "z" * 33  # 40 car., jamais un vrai secret
+CANARY_PAT = "pat-" + "q" * 36  # PAT interne factice, jamais un vrai secret
 PHRASE = "phrase-de-test-2026"
 
 
@@ -45,9 +46,9 @@ def environ(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _client() -> httpx.AsyncClient:
+def _client(pat: str | None = CANARY_PAT) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=construire_application()),
+        transport=httpx.ASGITransport(app=construire_application(jeton_upstream=pat)),
         base_url=EMETTEUR,
     )
 
@@ -62,8 +63,62 @@ def test_sante_ne_fuit_pas_le_jeton(environ):
             r = await c.get("/health")
             assert r.status_code == 200
             assert CANARY_JETON not in r.text
+            assert CANARY_PAT not in r.text
+            assert r.json()["upstream_auth"] == "configure"
 
     _courir(_t())
+
+
+def test_erreur_metier_ne_fuit_pas_le_pat(environ):
+    """Un refus local (outil inconnu) ne contient ni le PAT ni le jeton."""
+    import socket
+    import time
+
+    async def _post(request):
+        corps = json.loads(await request.body())
+        return JSONResponse({"jsonrpc": "2.0", "id": corps.get("id"), "result": {"tools": []}})
+
+    app_stub = Starlette(routes=[Route("/mcp", _post, methods=["POST"])])
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.listen(128)
+    serveur = uvicorn.Server(uvicorn.Config(app_stub, log_level="error"))
+    threading.Thread(target=serveur.run, kwargs={"sockets": [sock]}, daemon=True).start()
+    for _ in range(300):
+        if serveur.started:
+            break
+        time.sleep(0.02)
+    try:
+        os.environ["GITHUB_MCP_UPSTREAM"] = f"http://127.0.0.1:{port}"
+
+        async def _t():
+            async with _client() as c:
+                entetes = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "Authorization": f"Bearer {CANARY_JETON}",
+                }
+                r = await c.post(
+                    "/mcp",
+                    content=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).encode(),
+                    headers=entetes,
+                )
+                session = r.headers.get("mcp-session-id")
+                r = await c.post(
+                    "/mcp",
+                    content=json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                        "params": {"name": "outil-inexistant", "arguments": {}}}).encode(),
+                    headers={**entetes, **({"mcp-session-id": session} if session else {})},
+                )
+                assert CANARY_PAT not in r.text
+                assert CANARY_JETON not in r.text
+
+        _courir(_t())
+    finally:
+        serveur.should_exit = True
+        sock.close()
 
 
 def test_401_et_404_ne_fuient_pas_le_jeton(environ):
