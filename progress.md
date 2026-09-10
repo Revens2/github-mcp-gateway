@@ -7,24 +7,30 @@ MCP GitHub privé RW pour ChatGPT Web sur VPS étude : upstream officiel
 depuis ChatGPT Web.
 
 ## Étape courante
-Phase 3 terminée (repo + gateway + tests verts en local). En attente : déploiement
-VPS (phases 6-7), PAT humain (phase 5), E2E (phases 8-10), revue + GO (11-12).
+Phase 7 terminée sans PAT : nginx public OK (PRM/AS/401 vérifiés depuis l'extérieur,
+astra/tasks/calendar non régressés). En attente : PAT humain (phase 5), phrase de
+consentement, E2E (phases 8-10), revue + GO (11-12).
 
 ## Fait
 - Phase 1 : 4 audits read-only (RAG, VPS live, serveur officiel, patterns).
-- Phase 2 : décision CAS A documentée (pas de bridge Rust), ports 8800/8799.
-- Phase 3 : repo `github-mcp-gateway` (copie-adaptation calendar), politique 94 tools,
-  units systemd ×2, snippet nginx 5 blocs, compose, install, val_github.py, README,
-  CI gitleaks+pytest, tests redaction/canary. 96/96 tests gateway+redaction verts
-  (Windows) ; 6 tests oauth_magasin hérités échouent sur Windows comme sur le
-  template d'origine (perms/flock) — CI Ubuntu fera foi.
+- Phase 2 : décision CAS A documentée (pas de bridge Rust), ports 8800/8799
+  (8798 occupé par activity-mcp.service, dérive vs audit).
+- Phase 3 : repo `github-mcp-gateway` poussé, CI verte sur run précédent.
+- Phase 4 : fix OAuth discovery (ressource sans /oauth, resource_metadata doc URL)
+  + injection PAT par la gateway (upstream http exige Bearer par requête, preuve
+  token.go v1.12.0). 100/100 tests gateway+redaction verts.
+- Phase 6 : /srv/github installé, image v1.12.0@sha256:46cdbbd8 pinnée, MRTR généré,
+  upstream+gateway actifs loopback, discovery loopback OK.
+- Phase 7 : 7 blocs nginx insérés (script idempotent, backup, nginx -t OK),
+  PRM/AS/401 vérifiés depuis Internet, autres MCP à 200.
 
 ## À faire
-- [ ] Créer le dépôt GitHub `Revens2/github-mcp-gateway` + push.
-- [ ] VPS : backup nginx/systemd, `/srv/github`, pull image + digest, install gateway.
+- [x] Créer le dépôt GitHub `Revens2/github-mcp-gateway` + push.
+- [x] VPS : backup nginx/systemd, `/srv/github`, pull image + digest, install gateway.
 - [ ] PAT : action humaine (création + saisie terminal, jamais dans le chat).
-- [ ] nginx 5 blocs + reload, OAuth + MCP exterieur, E2E lecture puis écriture.
-- [ ] Connecteur ChatGPT Web + E2E RW depuis ChatGPT + cleanup.
+- [ ] Phrase de consentement via `creer-phrase-github-mcp.sh` (humain).
+- [ ] `val_github.py` lecture + `--create --repo PROPRIO/DEPOT` (moi, dès PAT présent).
+- [ ] Connecteur ChatGPT Web + E2E RW depuis ChatGPT + cleanup (Titou).
 - [ ] `github-code-review` (GO/NO-GO), revue Astra, GO production, rapport final.
 
 ## Décisions
