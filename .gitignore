@@ -1,0 +1,35 @@
+# Secrets / credentials OAuth — jamais versionnés
+.env
+.env.*
+!.env.example
+github.env
+upstream.env
+secrets/
+gcp-oauth.keys.json
+oauth/
+data/
+*.pat
+*.token
+oauth-clients.json*
+*.json.orig
+*.log
+
+# Sauvegardes / anciennes versions
+*.bak
+*.bak.*
+*~
+*.orig
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Éditeurs / OS
+*.swp
+.DS_Store
+Thumbs.db

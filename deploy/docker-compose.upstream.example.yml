@@ -1,0 +1,43 @@
+# GitHub MCP upstream officiel — compose de reference (boucle locale stricte).
+# Alternative a deploy/github-mcp-upstream.service (systemd + docker run).
+# Ne JAMAIS publier 8082 sur une interface publique : 127.0.0.1 uniquement.
+# Le seul point d'entree externe est la passerelle github-mcp-gateway
+# (127.0.0.1:8799), elle-meme servie par nginx (443, OAuth).
+#
+# Image pinnee : ghcr.io/github/github-mcp-server:v1.12.0
+# (relever le digest au pull : docker pull ... && docker inspect --format='{{.Id}}').
+# Secrets (PAT + MRTR) : fichier .env 0600 hors Git, jamais versionne.
+
+services:
+  github-mcp-upstream:
+    image: ghcr.io/github/github-mcp-server:v1.12.0
+    container_name: github-mcp-upstream
+    restart: unless-stopped
+    command: ["http", "--port", "8082", "--base-path", "/mcp"]
+    env_file:
+      - ./upstream.env
+    environment:
+      GITHUB_TOOLSETS: "all"
+
+    # Boucle locale stricte uniquement : serveur MCP Streamable HTTP stateless.
+    ports:
+      - "127.0.0.1:8798:8082"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8082/mcp || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

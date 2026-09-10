@@ -1,0 +1,48 @@
+[Unit]
+Description=GitHub MCP auth gateway (OAuth colocalise + proxy upstream)
+After=network-online.target github-mcp-upstream.service
+Wants=network-online.target
+Requires=github-mcp-upstream.service
+
+[Service]
+User=github-app
+Group=github-app
+WorkingDirectory=/srv/github
+EnvironmentFile=/srv/github/secrets/github.env
+ExecStart=/srv/github/venv/bin/python -m github_gateway.server
+Restart=always
+RestartSec=3
+
+# --- Isolation (calque sur tasks-gateway.service) ---
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Boucle locale uniquement : nginx est le seul point d'entree externe.
+IPAddressAllow=localhost
+IPAddressDeny=any
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+# Seul l'etat OAuth est ecrit (registre clients, jetons, consentements).
+ReadWritePaths=/srv/github/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
