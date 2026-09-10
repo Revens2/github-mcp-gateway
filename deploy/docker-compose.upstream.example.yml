@@ -10,7 +10,7 @@
 
 services:
   github-mcp-upstream:
-    image: ghcr.io/github/github-mcp-server:v1.12.0
+    image: ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33
     container_name: github-mcp-upstream
     restart: unless-stopped
     command: ["http", "--port", "8082", "--base-path", "/mcp"]

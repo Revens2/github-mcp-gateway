@@ -64,6 +64,6 @@ systemctl daemon-reload
 systemctl enable github-mcp-upstream.service github-mcp-gateway.service
 echo "OK : fichiers installes. Etapes suivantes (voir README) :"
 echo "  1. saisir PAT + MRTR dans $APP/secrets/upstream.env (0600)"
-echo "  2. sudo bash $APP/deploy/creer-phrase-*.sh (phrase consentement)"
+echo "  2. sudo bash $SRC/deploy/creer-phrase-github-mcp.sh (phrase consentement)"
 echo "  3. inserer deploy/nginx-mymcps-github-snippet.conf dans mymcps.duckdns.org.conf"
 echo "  4. systemctl start github-mcp-upstream && valider, puis start gateway"

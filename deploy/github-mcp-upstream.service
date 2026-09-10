@@ -13,7 +13,7 @@ ExecStart=/usr/bin/docker run --rm --name github-mcp-upstream \
   --env GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PERSONAL_ACCESS_TOKEN} \
   --env GITHUB_TOOLSETS=all \
   --env GITHUB_MCP_SERVER_MRTR_STATE_KEY=${GITHUB_MCP_SERVER_MRTR_STATE_KEY} \
-  ghcr.io/github/github-mcp-server:v1.12.0 \
+  ghcr.io/github/github-mcp-server:v1.12.0@sha256:46cdbbd810faf6f7aed1745ea04057443f5cb9fcadc15c7308add18cf9a83e33 \
   http --port 8082 --base-path /mcp
 ExecStop=/usr/bin/docker stop github-mcp-upstream
 Restart=always
