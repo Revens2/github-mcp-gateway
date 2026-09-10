@@ -122,6 +122,37 @@ def test_metadonnees_ressource_protegee(environ):
     _courir(_t())
 
 
+def test_ressource_derivee_issuer_oauth_sans_prefixe(environ, monkeypatch):
+    """Non-regression live (astra/tasks/calendar) : avec un issuer path-scope
+    https://h/oauth/github, la ressource annoncee est https://h/github/mcp
+    (sans /oauth), dans la PRM comme dans le 401 — octet-pour-octet avec nginx."""
+    emetteur_oauth = "https://github.example.test/oauth/github"
+    monkeypatch.setenv("GITHUB_MCP_ISSUER", emetteur_oauth)
+    app = construire_application(jeton_statique=JETON_ECRITURE)
+
+    async def _t():
+        # Base SANS chemin : en production nginx transmet les chemins absolus
+        # (/.well-known/...) tels quels a la passerelle (root_path /).
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="https://github.example.test") as c:
+            r = await c.get("/.well-known/oauth-protected-resource/github/mcp")
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["resource"] == "https://github.example.test/github/mcp"
+            assert [_normaliser_issuer(x) for x in d["authorization_servers"]] == [emetteur_oauth]
+            r = await c.post(
+                "/mcp",
+                content=_json_rpc("initialize", 1),
+                headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+            )
+            assert r.status_code == 401
+            assert 'resource_metadata="https://github.example.test/.well-known/oauth-protected-resource/github/mcp"' in r.headers.get(
+                "www-authenticate", ""
+            )
+
+    _courir(_t())
+
+
 # --- Acces /mcp sans jeton -------------------------------------------------------------
 def test_mcp_anonyme_refuse_post(environ):
     async def _t():

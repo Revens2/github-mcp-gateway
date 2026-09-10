@@ -17,7 +17,11 @@ import os
 
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend, RequireAuthMiddleware
 from mcp.server.auth.provider import ProviderTokenVerifier
-from mcp.server.auth.routes import create_auth_routes, create_protected_resource_routes
+from mcp.server.auth.routes import (
+    build_resource_metadata_url,
+    create_auth_routes,
+    create_protected_resource_routes,
+)
 from mcp.server.auth.settings import ClientRegistrationOptions
 from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
@@ -92,6 +96,12 @@ def construire_application(
         jeton_statique=jeton,
     )
     proxy = ProxyMCP(upstream, politique=POLITIQUE)
+    # Ressource MCP publique : l'issuer est path-scope (/oauth/{svc}) mais la
+    # ressource est racine (/github/mcp) — pattern live astra/tasks/calendar :
+    # resource = issuer sans "/oauth" + "/mcp". La route PRM du SDK en derive
+    # (/.well-known/oauth-protected-resource/github/mcp) et le 401 annonce la
+    # bonne resource_metadata, octet-pour-octet avec nginx.
+    ressource = emetteur.replace("/oauth", "") + CHEMIN_MCP
 
     routes: list[Route] = [
         *create_auth_routes(
@@ -104,7 +114,7 @@ def construire_application(
             ),
         ),
         *create_protected_resource_routes(
-            resource_url=AnyHttpUrl(f"{emetteur}{CHEMIN_MCP}"),
+            resource_url=AnyHttpUrl(ressource),
             authorization_servers=[AnyHttpUrl(emetteur)],
             scopes_supported=PORTEES,
             resource_name="GitHub MCP (passerelle)",
@@ -116,7 +126,7 @@ def construire_application(
             endpoint=RequireAuthMiddleware(
                 proxy,
                 required_scopes=[PORTEE],
-                resource_metadata_url=AnyHttpUrl(f"{emetteur}{CHEMIN_MCP}"),
+                resource_metadata_url=build_resource_metadata_url(AnyHttpUrl(ressource)),
             ),
             methods=["GET", "POST", "DELETE", "OPTIONS"],
         ),
