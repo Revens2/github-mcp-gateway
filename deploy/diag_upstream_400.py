@@ -45,6 +45,8 @@ def main() -> None:
         ("SSE seul sans version", {"Accept": "text/event-stream"}, "2025-06-18"),
         ("JSON seul + version", {"Accept": "application/json", "Mcp-Protocol-Version": "2025-06-18"}, "2025-06-18"),
         ("body 2025-03-26 + header 2025-03-26", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-03-26"}, "2025-03-26"),
+        ("body 2025-11-25 + header 2025-11-25", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-11-25"}, "2025-11-25"),
+        ("body 2026-07-28 sans header", {"Accept": "application/json, text/event-stream"}, "2026-07-28"),
         ("body 2026-07-28 + header 2026-07-28", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2026-07-28"}, "2026-07-28"),
     ]
     with httpx.Client(timeout=60.0) as client:
@@ -57,6 +59,7 @@ def main() -> None:
             ("tools/list header 2025-06-18", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-06-18"}),
             ("tools/list header 2026-07-28", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2026-07-28"}),
             ("tools/list header 2025-03-26", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-03-26"}),
+            ("tools/list header 2025-11-25", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-11-25"}),
         ]
         for nom, suppl in outils:
             entetes = {"Content-Type": "application/json", "Authorization": f"Bearer {pat}", **suppl}
