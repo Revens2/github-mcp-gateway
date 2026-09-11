@@ -231,6 +231,11 @@ def test_flux_oauth_complet(environ):
             r = await c.get(f"/consentement?demande={demande}")
             assert r.status_code == 200
             assert "depots GitHub" in r.text
+            # Le POST doit revenir sur l'URL OAuth (/oauth/github/...) : un action
+            # absolu /consentement tomberait sur le catch-all 444 de nginx et le
+            # flux ChatGPT mourrait sans redirection (bug constate en prod).
+            assert 'action="consentement"' in r.text
+            assert 'action="/consentement"' not in r.text
 
             # 4. Mauvaise phrase -> 401 ; bonne phrase -> code
             r = await c.post(

@@ -37,12 +37,22 @@ vers l'upstream, sur la base des portees du jeton deja valide par le gateway :
 from __future__ import annotations
 
 import json
+import logging
+import time
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
 
 import httpx
 
 from github_gateway.politique import PolitiqueOutils
+
+# Journalisation minimale et structuree des echecs de relais : methode,
+# destination locale et duree seulement, jamais de corps ni de credential.
+_journal = logging.getLogger("uvicorn.error")
+
+# Au-dela de cette attente de la reponse upstream, le relais est considere comme
+# anormalement lent (session SSE exceptee) et journalise en warning.
+_SEUIL_REPONSE_LENTE_S = 30.0
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -187,10 +197,14 @@ class ProxyMCP:
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None:
-            # Timeouts longs : une session SSE GET reste ouverte plusieurs heures.
+            # Capacite large (300) pour encaisser les salves de sessions du
+            # connecteur, attente de creneau bornee (30 s) pour echouer vite et
+            # de facon explicite au lieu de stall silencieusement (lecon live :
+            # pool sature par des sessions SSE longue duree => 502/504).
+            # Read/connect inchanges : 3600 s pour une session SSE legitime.
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(3600.0, connect=5.0),
-                limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+                timeout=httpx.Timeout(3600.0, connect=5.0, pool=30.0),
+                limits=httpx.Limits(max_connections=300, max_keepalive_connections=50),
             )
         return self._client
 
@@ -356,12 +370,20 @@ class ProxyMCP:
             )
             return
 
+        debut = time.monotonic()
         try:
             requete = self._http().build_request(
                 methode, url, headers=self._entetes_upstream(scope), content=corps
             )
             reponse = await self._http().send(requete, stream=True)
         except httpx.HTTPError as exc:
+            _journal.warning(
+                "relais %s %s en echec apres %.0f ms: %s (reponse 502)",
+                methode,
+                url,
+                (time.monotonic() - debut) * 1000,
+                exc.__class__.__name__,
+            )
             await _envoyer_reponse_json(
                 send,
                 502,
@@ -378,6 +400,14 @@ class ProxyMCP:
                 await _relayer_flux(send, reponse)
             else:
                 corps_reponse = await reponse.aread()
+                attente = time.monotonic() - debut
+                if attente > _SEUIL_REPONSE_LENTE_S:
+                    _journal.warning(
+                        "relais %s %s : en-tetes upstream apres %.0f s (anormalement lent)",
+                        methode,
+                        url,
+                        attente,
+                    )
                 if methode == "POST":
                     corps_reponse = self.filtrer_liste(
                         corps_reponse,

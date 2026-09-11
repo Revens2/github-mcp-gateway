@@ -52,7 +52,10 @@ _GABARIT = """<!doctype html>
 GitHub. Saisissez votre phrase de passe pour autoriser cette connexion.</p>
 <ul class="droits">{droits}</ul>
 {erreur}
-<form method="post" action="/consentement">
+<!-- Action relative : la page est servie sous /oauth/github/consentement (nginx
+     ne route que ce prefixe) ; un action absolu /consentement tomberait sur le
+     catch-all 444 et le POST n'atteindrait jamais la passerelle. -->
+<form method="post" action="consentement">
   <input type="hidden" name="demande" value="{demande}">
   <input type="password" name="phrase" placeholder="Phrase de passe" autofocus
          autocomplete="current-password" required>
