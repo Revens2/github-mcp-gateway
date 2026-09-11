@@ -304,13 +304,17 @@ _OUTILS_UPSTREAM = sorted(
 _PROFIL_COMPLET = frozenset(set(OUTILS_LECTURE) | set(OUTILS_ECRITURE))
 
 
-def _serveur_stub(outils: list[str] | None = None) -> tuple[uvicorn.Server, str, object, list]:
+def _serveur_stub(outils: list[str] | None = None, forcar_sse: bool = False) -> tuple[uvicorn.Server, str, object, list]:
     """Upstream factice : initialize/session, tools/list, tools/call comptabilises.
 
     Retourne (serveur, url, socket, recus) ou `recus` recoit chaque tools/call
     relaye par le proxy : {"name": ..., "id": ..., "authorization": ...} (en-tete
     Authorization vu par l'upstream, pour prouver l'injection du PAT interne et
     la non-retransmission du jeton client).
+
+    `forcar_sse` : repond toujours en enveloppe SSE (comme l'upstream officiel,
+    qui privilegie SSE des qu'il est accepte), pour tester le filtrage SSE de
+    la passerelle independamment de l'Accept normalise envoye.
     """
     import socket
     import time
@@ -319,10 +323,10 @@ def _serveur_stub(outils: list[str] | None = None) -> tuple[uvicorn.Server, str,
 
     async def _post(request):
         def _reponse(donnees, session):
-            """Repond en SSE (comme l'upstream reel 2.6.3) quand le client ne demande
-            que text/event-stream, sinon en JSON nu."""
+            """Repond en SSE (comme l'upstream reel officiel) quand forcar_sse
+            ou quand le client ne demande que text/event-stream, sinon JSON nu."""
             accept = request.headers.get("accept", "")
-            if "text/event-stream" in accept and "application/json" not in accept:
+            if forcar_sse or ("text/event-stream" in accept and "application/json" not in accept):
                 corps = "event: message\ndata: " + json.dumps(donnees, ensure_ascii=False) + "\n\n"
                 return Response(corps, media_type="text/event-stream", headers={"mcp-session-id": session})
             return JSONResponse(donnees, headers={"mcp-session-id": session})
@@ -527,7 +531,7 @@ def test_outil_inconnu_jamais_liste_en_sse(environ):
     """Un outil inconnu n'est pas annonce non plus quand l'upstream repond en SSE."""
 
     async def _t():
-        serveur, url, _socket_ecoute, recus = _serveur_stub()
+        serveur, url, _socket_ecoute, recus = _serveur_stub(forcar_sse=True)
         try:
             os.environ["GITHUB_MCP_UPSTREAM"] = url
             async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
@@ -961,6 +965,60 @@ def test_mcp_oauth_magasin_corrompu_401_pas_500(environ):
             assert r.status_code == 200
 
     _courir(_t())
+
+
+def test_accept_normalise_sse_seul_facon_chatgpt(environ):
+    """Compatibilite ChatGPT : l'upstream officiel repond 400 si `Accept` ne
+    contient pas a la fois JSON et SSE. La passerelle normalise vers les deux :
+    une requete cliente SSE-seule est relayee avec succes."""
+    import socket
+    import time
+
+    vus: list[str] = []
+
+    async def _post(request):
+        corps = json.loads(await request.body())
+        vus.append(request.headers.get("accept", ""))
+        if "application/json" not in vus[-1].lower() or "text/event-stream" not in vus[-1].lower():
+            return Response("Accept must contain both", status_code=400, media_type="text/plain")
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": corps.get("id"), "result": {"protocolVersion": "2025-06-18", "capabilities": {}}},
+            headers={"mcp-session-id": request.headers.get("mcp-session-id", "") or str(uuid.uuid4())},
+        )
+
+    app = Starlette(routes=[Route("/mcp", _post, methods=["POST"])])
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.listen(128)
+    serveur = uvicorn.Server(uvicorn.Config(app, log_level="error"))
+    threading.Thread(target=serveur.run, kwargs={"sockets": [sock]}, daemon=True).start()
+    for _ in range(300):
+        if serveur.started:
+            break
+        time.sleep(0.02)
+    try:
+        os.environ["GITHUB_MCP_UPSTREAM"] = f"http://127.0.0.1:{port}"
+
+        async def _t():
+            async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+                # Client facon ChatGPT : SSE seul, sans version.
+                entetes = {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    "Authorization": f"Bearer {JETON_ECRITURE}",
+                }
+                r = await c.post("/mcp", content=_json_rpc("initialize", 1), headers=entetes)
+                assert r.status_code == 200, r.text
+                assert "result" in r.json(), r.text
+                assert len(vus) == 1
+                assert "application/json" in vus[0].lower() and "text/event-stream" in vus[0].lower()
+
+        _courir(_t())
+    finally:
+        serveur.should_exit = True
+        sock.close()
 
 
 def test_lire_code_expire_fail_closed(tmp_path):

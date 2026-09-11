@@ -189,8 +189,18 @@ class ProxyMCP:
         L'en-tete `Authorization` du client n'est jamais repris (hors allowlist
         de `_entetes`) : seul le PAT interne est envoye, et uniquement vers
         l'upstream en boucle locale.
+
+        Compatibilite ChatGPT : le SDK Go upstream repond 400 des que `Accept`
+        ne contient pas A LA FOIS `application/json` et `text/event-stream`
+        (constate : ChatGPT n'envoie souvent que l'un des deux). On normalise
+        donc vers les deux : le filtrage aval gere les deux enveloppes (JSON nu
+        et SSE) et le relais GET retransmet l'octet-stream tel quel.
         """
         entetes = _entetes(scope)
+        accept = entetes.get("accept", "")
+        bas = accept.lower()
+        if "application/json" not in bas or "text/event-stream" not in bas:
+            entetes["accept"] = "application/json, text/event-stream"
         if self._jeton_upstream is not None:
             entetes["authorization"] = f"Bearer {self._jeton_upstream}"
         return entetes
