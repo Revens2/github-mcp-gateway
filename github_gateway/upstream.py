@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
@@ -49,6 +50,11 @@ from github_gateway.politique import PolitiqueOutils
 # Journalisation minimale et structuree des echecs de relais : methode,
 # destination locale et duree seulement, jamais de corps ni de credential.
 _journal = logging.getLogger("uvicorn.error")
+
+# Diagnostic temporaire (GITHUB_MCP_DEBUG_RELAY=1) : journalise methode,
+# content-type/accept/version/session et statut upstream. Jamais l'Authorization
+# (ni client ni interne), jamais le corps des tools/call (donnees privees).
+_DEBUG_RELAY = os.environ.get("GITHUB_MCP_DEBUG_RELAY", "") == "1"
 
 # Au-dela de cette attente de la reponse upstream, le relais est considere comme
 # anormalement lent (session SSE exceptee) et journalise en warning.
@@ -382,10 +388,23 @@ class ProxyMCP:
 
         debut = time.monotonic()
         try:
+            headers_up = self._entetes_upstream(scope)
+            if _DEBUG_RELAY:
+                _journal.warning(
+                    "debug-relay %s %s ct=%r accept=%r mcpv=%r sess=%r",
+                    methode,
+                    url,
+                    headers_up.get("content-type", ""),
+                    headers_up.get("accept", ""),
+                    headers_up.get("mcp-protocol-version", ""),
+                    "oui" if headers_up.get("mcp-session-id") else "non",
+                )
             requete = self._http().build_request(
-                methode, url, headers=self._entetes_upstream(scope), content=corps
+                methode, url, headers=headers_up, content=corps
             )
             reponse = await self._http().send(requete, stream=True)
+            if _DEBUG_RELAY:
+                _journal.warning("debug-relay reponse %s -> HTTP %s", url, reponse.status_code)
         except httpx.HTTPError as exc:
             _journal.warning(
                 "relais %s %s en echec apres %.0f ms: %s (reponse 502)",
