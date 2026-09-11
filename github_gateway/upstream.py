@@ -74,6 +74,18 @@ def _version_corps(corps: bytes | None) -> str | None:
     version = params.get("protocolVersion") if isinstance(params, dict) else None
     return version if isinstance(version, str) else None
 
+
+def _methode_corps(corps: bytes | None) -> str | None:
+    """Nom de methode JSON-RPC du corps (constante protocole), ou None."""
+    try:
+        donnees = json.loads(corps or b"")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(donnees, dict):
+        return None
+    methode = donnees.get("method")
+    return methode if isinstance(methode, str) else None
+
 # Au-dela de cette attente de la reponse upstream, le relais est considere comme
 # anormalement lent (session SSE exceptee) et journalise en warning.
 _SEUIL_REPONSE_LENTE_S = 30.0
@@ -421,14 +433,19 @@ class ProxyMCP:
         try:
             headers_up = self._entetes_upstream(scope, corps)
             if _DEBUG_RELAY:
+                # Methode JSON-RPC + version du corps initialize uniquement :
+                # constantes du protocole, jamais de donnees utilisateur.
+                methode_rpc = _methode_corps(corps)
                 _journal.warning(
-                    "debug-relay %s %s ct=%r accept=%r mcpv=%r sess=%r",
+                    "debug-relay %s %s ct=%r accept=%r mcpv=%r sess=%r rpc=%r initv=%r",
                     methode,
                     url,
                     headers_up.get("content-type", ""),
                     headers_up.get("accept", ""),
                     headers_up.get("mcp-protocol-version", ""),
                     "oui" if headers_up.get("mcp-session-id") else "non",
+                    methode_rpc,
+                    _version_corps(corps),
                 )
             requete = self._http().build_request(
                 methode, url, headers=headers_up, content=corps
