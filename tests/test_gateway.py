@@ -1021,6 +1021,84 @@ def test_accept_normalise_sse_seul_facon_chatgpt(environ):
         sock.close()
 
 
+def test_version_protocole_normalisee_facon_chatgpt(environ):
+    """ChatGPT envoie Mcp-Protocol-Version: 2026-07-28 (refuse 400 par
+    l'upstream) : la passerelle aligne sur le corps d'initialize quand il est
+    supporte, sinon retire l'en-tete ; une version supportee passe inchangee."""
+    import socket
+    import time
+
+    vus: list[str | None] = []
+    supportees = {"2025-03-26", "2025-06-18", "2025-11-25"}
+
+    async def _post(request):
+        corps = json.loads(await request.body())
+        vus.append(request.headers.get("mcp-protocol-version"))
+        if vus[-1] is not None and vus[-1] not in supportees:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": corps.get("id"), "error": {"code": -32602, "message": "version"}},
+                status_code=400,
+            )
+        if corps.get("method") == "tools/list":
+            noms = sorted(OUTILS_LECTURE | OUTILS_ECRITURE)
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": corps.get("id"), "result": {"tools": [{"name": n, "description": n} for n in noms]}},
+                headers={"mcp-session-id": request.headers.get("mcp-session-id", "") or str(uuid.uuid4())},
+            )
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": corps.get("id"), "result": {"protocolVersion": "2025-06-18", "capabilities": {}}},
+            headers={"mcp-session-id": request.headers.get("mcp-session-id", "") or str(uuid.uuid4())},
+        )
+
+    app = Starlette(routes=[Route("/mcp", _post, methods=["POST"])])
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.listen(128)
+    serveur = uvicorn.Server(uvicorn.Config(app, log_level="error"))
+    threading.Thread(target=serveur.run, kwargs={"sockets": [sock]}, daemon=True).start()
+    for _ in range(300):
+        if serveur.started:
+            break
+        time.sleep(0.02)
+    try:
+        os.environ["GITHUB_MCP_UPSTREAM"] = f"http://127.0.0.1:{port}"
+
+        async def _t():
+            async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+                base = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "Authorization": f"Bearer {JETON_ECRITURE}",
+                    "Mcp-Protocol-Version": "2026-07-28",
+                }
+                # 1. initialize corps 2025-06-18 : en-tete aligne sur le corps.
+                init = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                   "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                                              "clientInfo": {"name": "t", "version": "0"}}}).encode()
+                r = await c.post("/mcp", content=init, headers=base)
+                assert r.status_code == 200, r.text
+                session = r.headers.get("mcp-session-id")
+                assert vus[-1] == "2025-06-18", vus
+                # 2. tools/list (pas de version dans le corps) : en-tete retire.
+                liste = _json_rpc("tools/list", 2)
+                r = await c.post("/mcp", content=liste,
+                                 headers={**base, **({"mcp-session-id": session} if session else {})})
+                assert r.status_code == 200, r.text
+                assert vus[-1] is None, vus
+                # 3. version supportee : inchangee.
+                r = await c.post("/mcp", content=_json_rpc("ping", 3),
+                                 headers={**base, "Mcp-Protocol-Version": "2025-06-18"})
+                assert r.status_code == 200, r.text
+                assert vus[-1] == "2025-06-18", vus
+
+        _courir(_t())
+    finally:
+        serveur.should_exit = True
+        sock.close()
+
+
 def test_lire_code_expire_fail_closed(tmp_path):
     """Un code d'autorisation expire ne s'echange jamais (defense en
     profondeur, le SDK valide aussi expires_at)."""

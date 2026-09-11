@@ -56,6 +56,24 @@ _journal = logging.getLogger("uvicorn.error")
 # (ni client ni interne), jamais le corps des tools/call (donnees privees).
 _DEBUG_RELAY = os.environ.get("GITHUB_MCP_DEBUG_RELAY", "") == "1"
 
+# Versions de protocole MCP que l'upstream officiel accepte (v1.12.0 : 400
+# au-dela). ChatGPT annonce 2026-07-28 en en-tete avec un corps en version
+# anterieure : desaccord => HTTP 400. Voir _entetes_upstream.
+_VERSIONS_SUPPORTEES = frozenset({"2025-03-26", "2025-06-18", "2025-11-25"})
+
+
+def _version_corps(corps: bytes | None) -> str | None:
+    """protocolVersion du corps d'un `initialize`, ou None (autre methode)."""
+    try:
+        donnees = json.loads(corps or b"")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(donnees, dict) or donnees.get("method") != "initialize":
+        return None
+    params = donnees.get("params")
+    version = params.get("protocolVersion") if isinstance(params, dict) else None
+    return version if isinstance(version, str) else None
+
 # Au-dela de cette attente de la reponse upstream, le relais est considere comme
 # anormalement lent (session SSE exceptee) et journalise en warning.
 _SEUIL_REPONSE_LENTE_S = 30.0
@@ -189,7 +207,7 @@ class ProxyMCP:
         """Vrai si le credential GitHub interne est charge (jamais sa valeur)."""
         return self._jeton_upstream is not None
 
-    def _entetes_upstream(self, scope: Scope) -> dict[str, str]:
+    def _entetes_upstream(self, scope: Scope, corps: bytes | None = None) -> dict[str, str]:
         """En-tetes autorises + injection du credential GitHub interne.
 
         L'en-tete `Authorization` du client n'est jamais repris (hors allowlist
@@ -201,12 +219,25 @@ class ProxyMCP:
         (constate : ChatGPT n'envoie souvent que l'un des deux). On normalise
         donc vers les deux : le filtrage aval gere les deux enveloppes (JSON nu
         et SSE) et le relais GET retransmet l'octet-stream tel quel.
+
+        Compatibilite versions : une version d'en-tete non supportee par
+        l'upstream (ex. 2026-07-28 de ChatGPT) est remplacee par celle du corps
+        d'`initialize` quand elle est supportee, sinon retiree (le corps parle
+        alors seul — prouve 200 en diagnostic). Une version absente ou supportee
+        n'est jamais touchee.
         """
         entetes = _entetes(scope)
         accept = entetes.get("accept", "")
         bas = accept.lower()
         if "application/json" not in bas or "text/event-stream" not in bas:
             entetes["accept"] = "application/json, text/event-stream"
+        mcpv = entetes.get("mcp-protocol-version", "")
+        if "mcp-protocol-version" in entetes and mcpv not in _VERSIONS_SUPPORTEES:
+            version_corps = _version_corps(corps)
+            if version_corps in _VERSIONS_SUPPORTEES:
+                entetes["mcp-protocol-version"] = version_corps
+            else:
+                del entetes["mcp-protocol-version"]
         if self._jeton_upstream is not None:
             entetes["authorization"] = f"Bearer {self._jeton_upstream}"
         return entetes
@@ -388,7 +419,7 @@ class ProxyMCP:
 
         debut = time.monotonic()
         try:
-            headers_up = self._entetes_upstream(scope)
+            headers_up = self._entetes_upstream(scope, corps)
             if _DEBUG_RELAY:
                 _journal.warning(
                     "debug-relay %s %s ct=%r accept=%r mcpv=%r sess=%r",
