@@ -52,6 +52,17 @@ def main() -> None:
             entetes = {"Content-Type": "application/json", "Authorization": f"Bearer {pat}", **suppl}
             r = client.post(UPSTREAM, json=init_corps(version), headers=entetes)
             print(f"{r.status_code}  {nom}  :: {r.text[:160].replace(chr(10), ' ')}")
+        outils = [
+            ("tools/list sans version", {"Accept": "application/json, text/event-stream"}),
+            ("tools/list header 2025-06-18", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-06-18"}),
+            ("tools/list header 2026-07-28", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2026-07-28"}),
+            ("tools/list header 2025-03-26", {"Accept": "application/json, text/event-stream", "Mcp-Protocol-Version": "2025-03-26"}),
+        ]
+        for nom, suppl in outils:
+            entetes = {"Content-Type": "application/json", "Authorization": f"Bearer {pat}", **suppl}
+            corps = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+            r = client.post(UPSTREAM, json=corps, headers=entetes)
+            print(f"{r.status_code}  {nom}  :: {r.text[:160].replace(chr(10), ' ')}")
 
 
 if __name__ == "__main__":
