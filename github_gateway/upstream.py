@@ -86,6 +86,43 @@ def _methode_corps(corps: bytes | None) -> str | None:
     methode = donnees.get("method")
     return methode if isinstance(methode, str) else None
 
+
+_CLE_META_VERSION = "io.modelcontextprotocol/protocolVersion"
+
+
+def _normaliser_meta(corps: bytes | None) -> tuple[bytes | None, bool]:
+    """Retire la cle `_meta.protocolVersion` du corps quand sa valeur n'est pas
+    supportee par l'upstream (ex. 2026-07-28 de ChatGPT).
+
+    Contexte : avec un en-tete 2026-07-28, le SDK Go exige
+    `_meta["io.modelcontextprotocol/protocolVersion"]` coherente, sinon
+    -32602 ; une fois l'en-tete rabaisse (voir _entetes_upstream), une cle
+    2026-07-28 restante rend la requete incoherente et le 400 persiste. Seule
+    cette cle est touchee (autres cles `_meta` intactes) ; corps retourne tel
+    quel (memes octets) quand rien ne change. Retourne (corps, strippe?).
+    """
+    if not corps:
+        return corps, False
+    try:
+        donnees = json.loads(corps)
+    except (ValueError, UnicodeDecodeError):
+        return corps, False
+    if not isinstance(donnees, dict):
+        return corps, False
+    params = donnees.get("params")
+    if not isinstance(params, dict):
+        return corps, False
+    meta = params.get("_meta")
+    if not isinstance(meta, dict):
+        return corps, False
+    valeur = meta.get(_CLE_META_VERSION)
+    if not isinstance(valeur, str) or valeur in _VERSIONS_SUPPORTEES:
+        return corps, False
+    del meta[_CLE_META_VERSION]
+    if not meta:
+        del params["_meta"]
+    return json.dumps(donnees, ensure_ascii=False).encode(), True
+
 # Au-dela de cette attente de la reponse upstream, le relais est considere comme
 # anormalement lent (session SSE exceptee) et journalise en warning.
 _SEUIL_REPONSE_LENTE_S = 30.0
@@ -415,6 +452,12 @@ class ProxyMCP:
                 refuse_localement = await self._decider(send, corps, set(portees))
                 if refuse_localement:
                     return
+                # Coherence version : si l'en-tete a ete rabaisse, une cle _meta
+                # 2026-07-28 restante ferait encore 400 (-32602). Politique deja
+                # appliquee sur le corps d'origine (noms d'outils intacts).
+                corps, meta_strippee = _normaliser_meta(corps)
+            else:
+                meta_strippee = False
 
         if self._jeton_upstream is None:
             # Fail-closed : sans credential GitHub, aucun relais (l'upstream
@@ -437,7 +480,7 @@ class ProxyMCP:
                 # constantes du protocole, jamais de donnees utilisateur.
                 methode_rpc = _methode_corps(corps)
                 _journal.warning(
-                    "debug-relay %s %s ct=%r accept=%r mcpv=%r sess=%r rpc=%r initv=%r",
+                    "debug-relay %s %s ct=%r accept=%r mcpv=%r sess=%r rpc=%r initv=%r metastrip=%r",
                     methode,
                     url,
                     headers_up.get("content-type", ""),
@@ -446,6 +489,7 @@ class ProxyMCP:
                     "oui" if headers_up.get("mcp-session-id") else "non",
                     methode_rpc,
                     _version_corps(corps),
+                    meta_strippee if methode in ("POST", "PUT", "PATCH") else False,
                 )
             requete = self._http().build_request(
                 methode, url, headers=headers_up, content=corps

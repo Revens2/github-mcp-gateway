@@ -1099,6 +1099,87 @@ def test_version_protocole_normalisee_facon_chatgpt(environ):
         sock.close()
 
 
+def test_meta_version_incoherente_retiree_facon_chatgpt(environ):
+    """ChatGPT joint en-tete 2026-07-28 + cle _meta 2026-07-28 : l'upstream
+    repond -32602 tant que la cle reste. La passerelle rabaisse l'en-tete sur
+    le corps ET retire la cle incoherente (autres cles _meta intactes, corps
+    sans _meta inchange a l'octet pres)."""
+    import socket
+    import time
+
+    from github_gateway.upstream import _normaliser_meta
+
+    recus: list[bytes] = []
+    supportees = {"2025-03-26", "2025-06-18", "2025-11-25"}
+
+    async def _post(request):
+        brut = await request.body()
+        recus.append(brut)
+        corps = json.loads(brut)
+        if request.headers.get("mcp-protocol-version", "") not in supportees:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": corps.get("id"), "error": {"code": -32602, "message": "header"}},
+                status_code=400,
+            )
+        meta = (corps.get("params") or {}).get("_meta") or {}
+        if meta.get("io.modelcontextprotocol/protocolVersion", "2025-06-18") not in supportees:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": corps.get("id"), "error": {"code": -32602, "message": "meta"}},
+                status_code=400,
+            )
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": corps.get("id"), "result": {"protocolVersion": "2025-06-18", "capabilities": {}}},
+            headers={"mcp-session-id": str(uuid.uuid4())},
+        )
+
+    # Unitaire : seul le cas incoherent est reecrit.
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "autre": 1}}}
+    brut = json.dumps(init).encode()
+    nouveau, strippe = _normaliser_meta(brut)
+    assert strippe is True
+    relu = json.loads(nouveau)
+    assert relu["params"]["_meta"] == {"autre": 1}
+    intact, strippe2 = _normaliser_meta(b'{"jsonrpc":"2.0","id":7,"method":"ping","params":{}}')
+    assert strippe2 is False and intact == b'{"jsonrpc":"2.0","id":7,"method":"ping","params":{}}'
+
+    app = Starlette(routes=[Route("/mcp", _post, methods=["POST"])])
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.listen(128)
+    serveur = uvicorn.Server(uvicorn.Config(app, log_level="error"))
+    threading.Thread(target=serveur.run, kwargs={"sockets": [sock]}, daemon=True).start()
+    for _ in range(300):
+        if serveur.started:
+            break
+        time.sleep(0.02)
+    try:
+        os.environ["GITHUB_MCP_UPSTREAM"] = f"http://127.0.0.1:{port}"
+
+        async def _t():
+            async with _client(JETON_ECRITURE, SCOPES_ECRITURE) as c:
+                entetes = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                    "Authorization": f"Bearer {JETON_ECRITURE}",
+                    "Mcp-Protocol-Version": "2026-07-28",
+                }
+                r = await c.post("/mcp", content=brut, headers=entetes)
+                assert r.status_code == 200, r.text
+                assert "result" in r.json(), r.text
+                transmis = json.loads(recus[-1])
+                assert "io.modelcontextprotocol/protocolVersion" not in transmis["params"]["_meta"]
+                assert transmis["params"]["_meta"] == {"autre": 1}
+
+        _courir(_t())
+    finally:
+        serveur.should_exit = True
+        sock.close()
+
+
 def test_lire_code_expire_fail_closed(tmp_path):
     """Un code d'autorisation expire ne s'echange jamais (defense en
     profondeur, le SDK valide aussi expires_at)."""
