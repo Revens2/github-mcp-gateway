@@ -88,3 +88,26 @@ consentement, E2E (phases 8-10), revue + GO (11-12).
 - A AJOUTER avant prod : test /mcp etat corrompu avec Bearer (cf. reserve majeure).
 ### Verdict
 GO avec une reserve (test /mcp corrompu a ajouter, durcir si 500 confirme). Confirmations : (1) PAT hors argv — inspecter-scopes-pat.sh:17-33 lit le fichier en process, erreur sans secret (nom de classe seul) ; (2) phrase hors argv — creer-phrase-github-mcp.sh:28-30 via stdin (builtin printf, pas de process) + unset P1 P2, chemin /srv/github/secrets/github.env corrige ; (3) EtatOAuthCorrompu vers 503 — consentement.py:131-134,161-164,180-183 + app.py:177-185 JSON + oauth.py:300-306 expiry (flux normal intact : poser_code expire_a now+90, legacy sans expire_a en fail-closed) ; (4) garde loopback — app.py:82-86, allowlist exacte (127.0.0.1/localhost/::1 ; [::1] OK via urlparse, localhost.evil.com refuse), prod 127.0.0.1:8800 passe. Hygiene verifiee : venv+code root:root (install-gateway.sh:30), FICHIER_CLIENTS zero reference, REPERTOIRE_DEFAUT /srv/github/data/oauth aligne (install:17,42), 7 blocs docs, init docstring, doublon val_github retire (9f50a4d:224-225, usages intacts). GET vs HEAD sans regression (headers equivalents, echec reseau desormais exit 1 explicite). Aucun commentaire gh poste (attente accord explicite).
+
+## Correctif anti-materialisation get_file_contents (2026-09-13)
+
+### Cause racine (prouvee sur reponse brute upstream live)
+`tools/call get_file_contents` (fichier texte, ex. README.md) renvoie
+`result.content = [TextContent("successfully downloaded text file (SHA: ...)"),
+EmbeddedResource {"type":"resource","resource":{"uri":"repo://...","mimeType":"text/plain; charset=utf-8","text":"<contenu>"}}]`.
+Le bloc `resource` (et `resource_link` pour fichiers >= 1 Mo, `blob` pour
+binaires) est materialise par ChatGPT Web en piece jointe -> popup
+« Autoriser la materialisation des fichiers ? ».
+
+### Transformation (minimale, gateway uniquement, upstream officiel intouche)
+`github_gateway/lecture_fichier.py` (pur, stdlib) + branchement POST dans
+`ProxyMCP.__call__` (`upstream.py`) : uniquement pour `tools/call`
+`get_file_contents`, ressource texte -> un seul bloc texte (message/SHA +
+chemin + MIME + contenu en clair) ; binaire -> texte borne sans blob ;
+resource_link -> texte borne sans lien ; repertoire/erreur/autre outil ->
+octets strictement inchanges. JSON nu + enveloppes SSE geres.
+
+### Validation
+- 133 tests verts sur VPS (120 existants + 13 nouveaux `test_lecture_fichier.py`),
+  dont integration gateway via stub au format reel observe.
+- Fichiers : `lecture_fichier.py` (nouveau), `upstream.py`, `tests/test_lecture_fichier.py`, `README.md`, `progress.md`.

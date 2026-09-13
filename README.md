@@ -12,7 +12,10 @@ restent fournis par le serveur officiel.
 
 - `/authorize`, `/token`, `/register`, `/revoke`, `/consentement` — serveur
   d'autorisation OAuth colocalisé (RFC 8414/9728) + page de consentement à phrase de passe.
-- `/mcp` — middleware d'authentification puis proxy transparent vers l'upstream.
+- `/mcp` — middleware d'authentification puis proxy vers l'upstream (transparent
+  sauf `get_file_contents` : ressource intégrée / lien de ressource convertis
+  en texte direct, voir `github_gateway/lecture_fichier.py` — aucune pièce
+  jointe matérialisable côté ChatGPT).
 - Tout le reste répond 404.
 
 Endpoint public (via nginx `mymcps.duckdns.org`) : `https://mymcps.duckdns.org/github/mcp`

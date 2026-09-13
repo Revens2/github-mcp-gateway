@@ -29,6 +29,9 @@ vers l'upstream, sur la base des portees du jeton deja valide par le gateway :
 - `tools/call` : refuse localement (erreur JSON-RPC) si l'outil demande est en
   ecriture sans portee d'ecriture, ou n'est pas classe ; l'upstream n'est alors
   JAMAIS contacte ;
+- `tools/call get_file_contents` : la reponse upstream est normalisee en texte
+  direct (voir `lecture_fichier.py`) pour que ChatGPT recoive le contenu sans
+  ressource integree ni lien de ressource (aucune piece jointe a materialiser) ;
 - toute autre methode (`initialize`, `ping`, notifications) passe verbatim ;
 - un corps illisible ou une requete par lot (batch JSON-RPC) est refuse
   (fail-closed), le batch n'etant pas utilise par les clients MCP.
@@ -45,6 +48,7 @@ from typing import Any
 
 import httpx
 
+from github_gateway.lecture_fichier import normaliser_reponse_fichier
 from github_gateway.politique import PolitiqueOutils
 
 # Journalisation minimale et structuree des echecs de relais : methode,
@@ -530,6 +534,16 @@ class ProxyMCP:
                         attente,
                     )
                 if methode == "POST":
+                    # Anti-materialisation ChatGPT : les reponses `get_file_contents`
+                    # contenant une ressource integree (binaire/blob) ou un lien de
+                    # ressource (gros fichier) sont converties en texte direct ;
+                    # tout le reste (repertoire, erreur, autre outil) est inchange
+                    # a l'octet pres par `normaliser_reponse_fichier`.
+                    corps_reponse = normaliser_reponse_fichier(
+                        corps,
+                        corps_reponse,
+                        reponse.headers.get("content-type", "") or "",
+                    )
                     corps_reponse = self.filtrer_liste(
                         corps_reponse,
                         reponse.headers.get("content-type", "") or "",
