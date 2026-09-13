@@ -111,3 +111,9 @@ octets strictement inchanges. JSON nu + enveloppes SSE geres.
 - 133 tests verts sur VPS (120 existants + 13 nouveaux `test_lecture_fichier.py`),
   dont integration gateway via stub au format reel observe.
 - Fichiers : `lecture_fichier.py` (nouveau), `upstream.py`, `tests/test_lecture_fichier.py`, `README.md`, `progress.md`.
+
+## Validation E2E live post-redemarrage (2026-09-13, reprise mission)
+- /srv/github deja synchro avec HEAD ebccdf8 (diff -q upstream.py + lecture_fichier.py : identiques), service gateway restart 16:57:34 UTC, actifs gateway+upstream, ports 8799/8800 en ecoute loopback.
+- E2E get_file_contents README.md via gateway live : HTTP 200, 1 bloc, types ['text'], HAS_RESOURCE False, HAS_BLOB False, HAS_REPO_URI False, TEXT_LEN 5827, entete SHA + contenu en clair. Critere anti-materialisation : OK.
+- Regression : tools/list 86 outils (get_file_contents + get_me presents), get_me HTTP 200 sans erreur (login Revens2), lecture repertoire path '/' en texte sans ressource, /health upstream_auth configure, PRM local 200, public /github/mcp 401 (auth exigee) + PRM public 200.
+- Suite VPS : 133 passed (python3 -m pytest tests/ -q -p no:warnings).
