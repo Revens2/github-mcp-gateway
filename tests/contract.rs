@@ -395,3 +395,65 @@ fn fichier_texte_normalise_pas_de_resource() {
     assert_eq!(c.len(), 1);
     assert!(c[0]["text"].as_str().unwrap().contains("DATA"));
 }
+
+/// Pont fichier : une session Python existante (synthetique) passe le
+/// Bearer ; un opaque inconnu reste 401.
+#[tokio::test]
+async fn pont_fichier_session_existante_passe_bearer() {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use github_gateway_rs::{build_router_with_filestore, ServiceConfig};
+    use tower::ServiceExt;
+
+    let dir = std::env::temp_dir().join(format!(
+        "github-pont-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let etat = dir.join("etat.json");
+    let tok = "synthetique-github-pont-012345678900";
+    let doc = serde_json::json!({
+        "demandes": {}, "codes": {},
+        "acces": { tok: {
+            "jeton": tok, "client_id": "client-synth",
+            "scopes": ["github:lecture"], "resource": serde_json::Value::Null,
+            "expire_a": 9_999_999_999i64 } },
+        "rafraichissements": {},
+    });
+    std::fs::write(&etat, doc.to_string()).unwrap();
+    // Sans PAT : le refus local -32000 prouve l'auth OK (pas 401).
+    let app = build_router_with_filestore(
+        ServiceConfig {
+            upstream: "http://127.0.0.1:9".to_string(),
+            upstream_token: None,
+            static_token: "x".repeat(32),
+            static_token_scopes: vec![READ_SCOPE.to_string()],
+            oauth: oauth_cfg(),
+            max_body_bytes: 1024 * 1024,
+        },
+        Some(mcp_gateway::router::FileStoreMount {
+            etat_path: etat.to_string_lossy().to_string(),
+            expected_resource: None,
+        }),
+    )
+    .expect("gateway de test");
+    let body = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_me"}}"#;
+    let res = app
+        .oneshot(
+            Request::post("/mcp")
+                .header("authorization", format!("Bearer {tok}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["error"]["code"], -32000);
+    let _ = std::fs::remove_dir_all(&dir);
+}

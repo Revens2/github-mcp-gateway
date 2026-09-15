@@ -17,10 +17,13 @@
 //! * `GITHUB_MCP_RS_TOKEN_SCOPES` (defaut lecture+ecriture, cf. lecon lot 2 :
 //!   valeur quotée dans l'unit systemd),
 //! * `GITHUB_MCP_RS_CONSENT_HASH` (empreinte PBKDF2, vide = consentement refuse).
+//! * `GITHUB_MCP_RS_OAUTH_ETAT` (defaut `/srv/github/data/oauth/etat.json` :
+//!   pont READ-ONLY vers le magasin Python, sessions existantes sans
+//!   re-consentement ; vide = pont desactive).
 
 use github_gateway_rs::{
-    build_router, ServiceConfig, UpstreamToken, ISSUER_DEFAULT, READ_SCOPE, RESOURCE_NAME,
-    RESOURCE_URL, WRITE_SCOPE,
+    build_router_with_filestore, ServiceConfig, UpstreamToken, ISSUER_DEFAULT, READ_SCOPE,
+    RESOURCE_NAME, RESOURCE_URL, WRITE_SCOPE,
 };
 use mcp_auth::oauth::OAuthConfig;
 
@@ -83,6 +86,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         unsafe { std::env::set_var("GITHUB_MCP_RS_UPSTREAM", "http://127.0.0.1:8800") };
     }
+    // Pont fichier OAuth (transition) : Python = AS/control-plane, Rust =
+    // data-plane. Meme utilisateur UNIX que le Python (fichiers 0600).
+    if std::env::var("GITHUB_MCP_RS_OAUTH_ETAT")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
+        unsafe {
+            std::env::set_var(
+                "GITHUB_MCP_RS_OAUTH_ETAT",
+                "/srv/github/data/oauth/etat.json",
+            )
+        };
+    }
     let token = load_secret(
         "GITHUB_MCP_RS_TOKEN",
         "GITHUB_MCP_RS_TOKEN_FILE",
@@ -131,28 +148,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let port = env.port;
     let upstream_log = env.upstream.clone();
+    let mount = mcp_gateway::config::filestore_mount(&env);
     let pat_state = if upstream_token.is_some() {
         "configure"
     } else {
         "missing"
     };
-    let app = build_router(ServiceConfig {
-        upstream: env.upstream,
-        upstream_token,
-        static_token: env.static_token,
-        static_token_scopes: env.token_scopes,
-        oauth: OAuthConfig {
-            issuer: env.issuer,
-            resource_url: RESOURCE_URL.to_string(),
-            resource_name: RESOURCE_NAME.to_string(),
-            default_scope: READ_SCOPE.to_string(),
-            valid_scopes: vec![READ_SCOPE.to_string(), WRITE_SCOPE.to_string()],
-            extra_submit_scopes: vec![WRITE_SCOPE.to_string()],
-            consent_hash: env.consent_hash,
-            static_client_id: "github-mcp-cli-statique".to_string(),
+    let app = build_router_with_filestore(
+        ServiceConfig {
+            upstream: env.upstream,
+            upstream_token,
+            static_token: env.static_token,
+            static_token_scopes: env.token_scopes,
+            oauth: OAuthConfig {
+                issuer: env.issuer,
+                resource_url: RESOURCE_URL.to_string(),
+                resource_name: RESOURCE_NAME.to_string(),
+                default_scope: READ_SCOPE.to_string(),
+                valid_scopes: vec![READ_SCOPE.to_string(), WRITE_SCOPE.to_string()],
+                extra_submit_scopes: vec![WRITE_SCOPE.to_string()],
+                consent_hash: env.consent_hash,
+                static_client_id: "github-mcp-cli-statique".to_string(),
+            },
+            max_body_bytes: mcp_http::hardening::DEFAULT_MAX_BODY_BYTES,
         },
-        max_body_bytes: mcp_http::hardening::DEFAULT_MAX_BODY_BYTES,
-    })?;
+        mount,
+    )?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     tracing::info!(
         port,

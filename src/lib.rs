@@ -36,6 +36,7 @@ use serde_json::{json, Value};
 use zeroize::Zeroize;
 
 use mcp_auth::bearer::{bearer_middleware, json_response, BearerState, StaticBearer, TokenScopes};
+use mcp_auth::filestore::{ChainedResolver, FileStore};
 use mcp_auth::oauth::{
     auth_router, protected_resource_router, MemoryStore, OAuthConfig, OAuthState,
 };
@@ -228,10 +229,32 @@ async fn health_handler(State(s): State<HealthState>) -> Json<Value> {
 /// Assemble le routeur complet : sante + OAuth + PRM (+ alias) + `/mcp`
 /// (Bearer puis politique puis relais PAT upstream) + 404.
 pub fn build_router(cfg: ServiceConfig) -> Result<Router, mcp_core::error::Error> {
+    build_router_full(cfg, None)
+}
+
+/// Assemble le routeur avec pont fichier optionnel (sessions OAuth Python
+/// existantes acceptées sans re-consentement ; `None` = comme
+/// [`build_router`]). Le Bearer statique et le PAT upstream sont inchangés
+/// (aucune rotation : gate exploitant).
+pub fn build_router_with_filestore(
+    cfg: ServiceConfig,
+    mount: Option<mcp_gateway::router::FileStoreMount>,
+) -> Result<Router, mcp_core::error::Error> {
+    build_router_full(cfg, mount)
+}
+
+fn build_router_full(
+    cfg: ServiceConfig,
+    mount: Option<mcp_gateway::router::FileStoreMount>,
+) -> Result<Router, mcp_core::error::Error> {
     let store = Arc::new(MemoryStore::default());
+    let file = mount
+        .filter(|m| !m.etat_path.trim().is_empty())
+        .map(|m| Arc::new(FileStore::new(&m.etat_path)));
+    let chained = Arc::new(ChainedResolver::new(Arc::clone(&store), file));
     let oauth_state = OAuthState {
         config: Arc::new(cfg.oauth.clone()),
-        store: Arc::clone(&store),
+        store,
     };
     let bearer_state = BearerState::new(
         StaticBearer::new(
@@ -239,7 +262,7 @@ pub fn build_router(cfg: ServiceConfig) -> Result<Router, mcp_core::error::Error
             "github-mcp-cli-statique",
             &cfg.static_token_scopes,
         ),
-        store,
+        chained,
         vec![READ_SCOPE.to_string()],
         PRM_URL.to_string(),
     );
@@ -266,7 +289,7 @@ pub fn build_router(cfg: ServiceConfig) -> Result<Router, mcp_core::error::Error
                 .delete(mcp_handler)
                 .route_layer(middleware::from_fn_with_state(
                     bearer_state,
-                    bearer_middleware::<MemoryStore>,
+                    bearer_middleware::<ChainedResolver>,
                 )),
         )
         .with_state(app_state);

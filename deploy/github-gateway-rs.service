@@ -16,6 +16,9 @@ Environment=GITHUB_MCP_RS_PORT=18999
 Environment=GITHUB_MCP_RS_TOKEN_FILE=/opt/github-gateway-rs/.mcp_token
 Environment=GITHUB_MCP_RS_UPSTREAM_TOKEN_FILE=/srv/github/secrets/github-pat
 Environment="GITHUB_MCP_RS_TOKEN_SCOPES=github:lecture github:ecriture"
+# Pont fichier OAuth (transition, read-only) : sessions Python existantes
+# acceptees sans re-consentement. Meme User que le Python (0600).
+Environment=GITHUB_MCP_RS_OAUTH_ETAT=/srv/github/data/oauth/etat.json
 ExecStart=/opt/github-gateway-rs/github-gateway-rs
 Restart=always
 RestartSec=3
