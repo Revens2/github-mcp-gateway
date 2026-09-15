@@ -1,0 +1,45 @@
+[Unit]
+Description=GitHub MCP facade Rust (canary, loopback 18999)
+After=network-online.target github-mcp-gateway.service
+Wants=network-online.target
+
+[Service]
+# Canary : ne touche JAMAIS au service prod github-mcp-gateway.service.
+# Bascule atomique GATEE (rotation Bearer prod + consentement = exploitant) :
+# voir baseline-github-mcp.md avant tout changement de PORT vers 8799.
+User=github-app
+Group=github-app
+WorkingDirectory=/opt/github-gateway-rs
+Environment=GITHUB_MCP_RS_ISSUER=https://mymcps.duckdns.org/oauth/github
+Environment=GITHUB_MCP_RS_UPSTREAM=http://127.0.0.1:8800
+Environment=GITHUB_MCP_RS_PORT=18999
+Environment=GITHUB_MCP_RS_TOKEN_FILE=/opt/github-gateway-rs/.mcp_token
+Environment=GITHUB_MCP_RS_UPSTREAM_TOKEN_FILE=/srv/github/secrets/github-pat
+Environment="GITHUB_MCP_RS_TOKEN_SCOPES=github:lecture github:ecriture"
+ExecStart=/opt/github-gateway-rs/github-gateway-rs
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ReadWritePaths=/opt/github-gateway-rs
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
