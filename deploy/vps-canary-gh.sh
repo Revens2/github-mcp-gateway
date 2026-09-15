@@ -27,7 +27,7 @@ echo "[canary] build release…"
 cargo build --release
 echo "[canary] installation /opt/github-gateway-rs…"
 sudo install -d -o github-app -g github-app -m 0755 /opt/github-gateway-rs
-install -m 0755 target/release/github-gateway-rs /opt/github-gateway-rs/github-gateway-rs
+sudo install -m 0755 target/release/github-gateway-rs /opt/github-gateway-rs/github-gateway-rs
 sudo install -m 0644 deploy/github-gateway-rs.service /etc/systemd/system/github-gateway-rs.service
 sudo systemctl daemon-reload
 echo "[canary] demarrage github-gateway-rs.service (:18999)…"
